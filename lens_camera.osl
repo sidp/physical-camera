@@ -147,8 +147,10 @@ int trace_lens_system(
     vector ray_dir,
     float aperture_scale,
     output point exit_origin,
-    output vector exit_dir)
+    output vector exit_dir,
+    output int surfaces_passed)
 {
+    surfaces_passed = 0;
     float radii[NUM_SURFACES];
     float thicknesses[NUM_SURFACES];
     float iors[NUM_SURFACES];
@@ -178,22 +180,12 @@ int trace_lens_system(
         if (radii[idx] == 0.0)
             semi_ap *= aperture_scale;
 
-        // IOR of medium before this surface (toward sensor)
-        // and after (toward scene) from the ray's perspective (sensor→scene).
-        // iors[i] = IOR of medium to the right of surface i (toward sensor side
-        // in array order, but we're going in reverse).
-        // When tracing sensor→scene (reverse), n1 is on the sensor side of the
-        // surface and n2 is on the scene side.
-        float n1, n2;
-        if (idx < NUM_SURFACES - 1)
-            n1 = iors[idx + 1];  // medium between surface idx+1 and idx
-        else
-            n1 = 1.0;  // air behind the rear element
-
-        if (idx > 0)
-            n2 = iors[idx - 1];  // medium between surface idx and idx-1
-        else
-            n2 = 1.0;  // air in front of the front element
+        // iors[i] = IOR of the medium between surface i and surface i+1
+        // (toward sensor). When tracing sensor→scene at surface idx:
+        // n1 = medium the ray is in (sensor side) = iors[idx]
+        // n2 = medium the ray enters (scene side) = iors[idx-1] or air
+        float n1 = iors[idx];
+        float n2 = (idx > 0) ? iors[idx - 1] : 1.0;
 
         // Skip refraction at aperture stop
         if (radii[idx] == 0.0) {
@@ -207,6 +199,7 @@ int trace_lens_system(
         if (!refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, new_p, new_d))
             return 0;
 
+        surfaces_passed += 1;
         p = new_p;
         d = new_d;
     }
@@ -221,6 +214,8 @@ shader lens_camera(
         [[ string description = "Distance from sensor to rear lens vertex (mm). Controls focus." ]],
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
+    float debug_mode = 0.0
+        [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction" ]],
     output point position = 0,
     output vector direction = 0,
     output color throughput = 1)
@@ -235,6 +230,19 @@ shader lens_camera(
     point raster = camera_shader_raster_position();
     float rx = raster[0];
     float ry = raster[1];
+
+    // Map raster coordinates to physical sensor position (mm)
+    float sensor_x = (rx - 0.5) * sensor_w;
+    float sensor_y = (ry - 0.5) * sensor_h;
+
+    // Debug mode 1: pinhole camera to verify the framework
+    // +Z is the view direction in Blender's OSL camera convention
+    if (debug_mode >= 0.5 && debug_mode < 1.5) {
+        position = point(0, 0, 0);
+        direction = normalize(vector(sensor_x, sensor_y, 50.0));
+        throughput = 1.0;
+        return;
+    }
 
     // Random sample for DOF
     point rnd = camera_shader_random_sample();
@@ -254,11 +262,6 @@ shader lens_camera(
     // Rear vertex is at z=0 (per our layout), so sensor is at z = -sensor_distance
     float sensor_z = -sensor_distance;
 
-    // Map raster coordinates to physical sensor position (mm)
-    // Center at origin, flip so image isn't mirrored
-    float sensor_x = (rx - 0.5) * sensor_w;
-    float sensor_y = (ry - 0.5) * sensor_h;
-
     point sensor_point = point(sensor_x, sensor_y, sensor_z);
 
     // Sample point on rear lens aperture for DOF
@@ -275,19 +278,43 @@ shader lens_camera(
     // Trace through the lens system
     point  exit_origin = point(0, 0, 0);
     vector exit_dir = vector(0, 0, 0);
+    int surfaces_passed = 0;
 
-    if (trace_lens_system(sensor_point, initial_dir, aperture_scale, exit_origin, exit_dir)) {
-        // Transform from camera space to world space
-        // In our lens space, +Z is toward the scene which maps to -Z in
-        // Blender camera space (camera looks along -Z). We also need to
-        // convert mm to Blender units (meters): multiply by 0.001.
-        point cam_pos = point(-exit_origin[0] * 0.001,
-                               exit_origin[1] * 0.001,
-                              -exit_origin[2] * 0.001);
-        vector cam_dir = vector(-exit_dir[0], exit_dir[1], -exit_dir[2]);
+    int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
+                               exit_origin, exit_dir, surfaces_passed);
 
-        position  = transform("camera", "world", cam_pos);
-        direction = normalize(transform("camera", "world", cam_dir));
+    // Debug mode 2: surface count visualization
+    // Bright = more surfaces passed. Use pinhole direction so rays hit the scene.
+    if (debug_mode >= 1.5 && debug_mode < 2.5) {
+        float t = (float)surfaces_passed / (float)NUM_SURFACES;
+        position = point(0, 0, 0);
+        direction = normalize(vector(sensor_x, sensor_y, 50.0));
+        throughput = color(t, t, t);
+        return;
+    }
+
+    // Debug mode 3: exit direction as RGB (only for rays that survive)
+    if (debug_mode >= 2.5 && debug_mode < 3.5) {
+        if (ok) {
+            vector d_norm = normalize(exit_dir);
+            position = point(0, 0, 0);
+            direction = normalize(vector(sensor_x, sensor_y, 50.0));
+            throughput = color(d_norm[0] * 0.5 + 0.5,
+                               d_norm[1] * 0.5 + 0.5,
+                               d_norm[2] * 0.5 + 0.5);
+        } else {
+            throughput = 0.0;
+        }
+        return;
+    }
+
+    // Normal mode: output in camera space (Blender applies camera transform)
+    // Lens space +Z = toward scene = camera shader +Z. No axis flips needed.
+    if (ok) {
+        position = point(exit_origin[0] * 0.001,
+                         exit_origin[1] * 0.001,
+                         exit_origin[2] * 0.001);
+        direction = normalize(exit_dir);
         throughput = 1.0;
     } else {
         throughput = 0.0;
