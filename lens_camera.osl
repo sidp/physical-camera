@@ -138,6 +138,54 @@ float compute_sensor_distance(
     return rpp + d_i;
 }
 
+void compute_exit_pupil(
+    int num_surfaces,
+    int stop_index,
+    float radii[MAX_SURFACES],
+    float thicknesses[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    output float ep_z,
+    output float ep_magnification)
+{
+    // Build ABCD matrix for the rear subsystem (stop -> rear vertex).
+    // This gives the exit pupil position and magnification relative to the
+    // physical aperture stop, so we can aim rays at the apparent opening.
+    float A = 1.0, B = 0.0, C = 0.0, D = 1.0;
+
+    // Initial transfer from stop to first rear surface
+    float t = thicknesses[stop_index] / iors[stop_index];
+    A += t * C;
+    B += t * D;
+
+    for (int i = stop_index + 1; i < num_surfaces; i++) {
+        float n_before = iors[i - 1];
+        float n_after = iors[i];
+
+        // Refraction
+        if (radii[i] != 0.0 && n_before != n_after) {
+            float phi = (n_after - n_before) / radii[i];
+            C -= phi * A;
+            D -= phi * B;
+        }
+
+        // Transfer (skip after last surface)
+        if (i < num_surfaces - 1) {
+            t = thicknesses[i] / iors[i];
+            A += t * C;
+            B += t * D;
+        }
+    }
+
+    if (abs(D) < 1e-10) {
+        ep_z = 0.0;
+        ep_magnification = 0.0;
+        return;
+    }
+
+    ep_z = -B / D;
+    ep_magnification = abs(1.0 / D);
+}
+
 int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
 {
     float r = sqrt(x * x + y * y);
@@ -472,8 +520,18 @@ shader lens_camera(
     for (int i = 0; i < stop_index; i++)
         stop_z += thicknesses[i];
 
-    // Sample on the aperture stop plane so rays pass through the physical stop
+    // Sample on the exit pupil plane to reduce wasted rays for off-axis points.
+    // The exit pupil is the image of the aperture stop as seen through the rear
+    // lens group — it differs in position and size from the physical stop.
     float stop_semi_ap = apertures[stop_index] * 0.5 * aperture_scale;
+
+    float ep_z = 0.0;
+    float ep_magnification = 1.0;
+    compute_exit_pupil(num_surfaces, stop_index, radii, thicknesses, iors,
+                       ep_z, ep_magnification);
+    float aim_z = (ep_magnification > 0.0) ? ep_z : stop_z;
+    float aim_semi_ap = (ep_magnification > 0.0) ? stop_semi_ap * ep_magnification : stop_semi_ap;
+
     float blade_rot_rad = blade_rotation * M_PI / 180.0;
     float ax = 0.0;
     float ay = 0.0;
@@ -491,16 +549,16 @@ shader lens_camera(
         }
         float a0 = blade_rot_rad + float(sector) * sector_angle;
         float a1 = blade_rot_rad + float(sector + 1) * sector_angle;
-        ax = u1 * stop_semi_ap * cos(a0) + u2 * stop_semi_ap * cos(a1);
-        ay = u1 * stop_semi_ap * sin(a0) + u2 * stop_semi_ap * sin(a1);
+        ax = u1 * aim_semi_ap * cos(a0) + u2 * aim_semi_ap * cos(a1);
+        ay = u1 * aim_semi_ap * sin(a0) + u2 * aim_semi_ap * sin(a1);
     } else {
         float angle = rnd[0] * 2.0 * M_PI;
-        float r_sample = sqrt(r_param) * stop_semi_ap;
+        float r_sample = sqrt(r_param) * aim_semi_ap;
         ax = r_sample * cos(angle);
         ay = r_sample * sin(angle);
     }
 
-    point aperture_point = point(ax, ay, stop_z);
+    point aperture_point = point(ax, ay, aim_z);
 
     // Initial ray: sensor toward the stop
     vector initial_dir = normalize(aperture_point - sensor_point);
