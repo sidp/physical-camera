@@ -1,0 +1,295 @@
+#define NUM_SURFACES 11
+
+void load_lens_data(
+    output float radii[NUM_SURFACES],
+    output float thicknesses[NUM_SURFACES],
+    output float iors[NUM_SURFACES],
+    output float apertures[NUM_SURFACES])
+{
+    // Double Gauss 50mm f/2 (PBRT, US Patent 2,673,491)
+    // Listed front-to-back (scene-side to sensor-side)
+    radii[0]  =  29.475;  thicknesses[0]  = 3.76;  iors[0]  = 1.67;  apertures[0]  = 25.2;
+    radii[1]  =  84.83;   thicknesses[1]  = 0.12;  iors[1]  = 1.0;   apertures[1]  = 25.2;
+    radii[2]  =  19.275;  thicknesses[2]  = 4.025; iors[2]  = 1.67;  apertures[2]  = 23.0;
+    radii[3]  =  40.77;   thicknesses[3]  = 3.275; iors[3]  = 1.699; apertures[3]  = 23.0;
+    radii[4]  =  12.75;   thicknesses[4]  = 5.705; iors[4]  = 1.0;   apertures[4]  = 18.0;
+    radii[5]  =   0.0;    thicknesses[5]  = 4.5;   iors[5]  = 1.0;   apertures[5]  = 17.1;
+    radii[6]  = -14.495;  thicknesses[6]  = 1.18;  iors[6]  = 1.603; apertures[6]  = 17.0;
+    radii[7]  =  40.77;   thicknesses[7]  = 6.065; iors[7]  = 1.658; apertures[7]  = 20.0;
+    radii[8]  = -20.385;  thicknesses[8]  = 0.19;  iors[8]  = 1.0;   apertures[8]  = 20.0;
+    radii[9]  = 437.065;  thicknesses[9]  = 3.22;  iors[9]  = 1.717; apertures[9]  = 20.0;
+    radii[10] = -39.73;   thicknesses[10] = 0.0;   iors[10] = 1.0;   apertures[10] = 20.0;
+}
+
+int intersect_sphere(
+    point ray_origin,
+    vector ray_dir,
+    float sphere_center_z,
+    float radius,
+    output point hit_point)
+{
+    // Sphere center is on the optical axis at (0, 0, sphere_center_z)
+    float ox = ray_origin[0];
+    float oy = ray_origin[1];
+    float oz = ray_origin[2] - sphere_center_z;
+    float dx = ray_dir[0];
+    float dy = ray_dir[1];
+    float dz = ray_dir[2];
+
+    float a = dx * dx + dy * dy + dz * dz;
+    float b = 2.0 * (ox * dx + oy * dy + oz * dz);
+    float c = ox * ox + oy * oy + oz * oz - radius * radius;
+
+    float disc = b * b - 4.0 * a * c;
+    if (disc < 0.0)
+        return 0;
+
+    float sqrt_disc = sqrt(disc);
+    float t1 = (-b - sqrt_disc) / (2.0 * a);
+    float t2 = (-b + sqrt_disc) / (2.0 * a);
+
+    // Pick the intersection closest to the vertex (sphere_center_z - radius)
+    float vertex_z = sphere_center_z - radius;
+    point p1 = ray_origin + t1 * ray_dir;
+    point p2 = ray_origin + t2 * ray_dir;
+
+    float dist1 = abs(p1[2] - vertex_z);
+    float dist2 = abs(p2[2] - vertex_z);
+
+    if (dist1 < dist2) {
+        if (t1 > 1e-6) {
+            hit_point = p1;
+            return 1;
+        }
+    } else {
+        if (t2 > 1e-6) {
+            hit_point = p2;
+            return 1;
+        }
+    }
+
+    // Fallback: try the other solution
+    if (dist1 < dist2) {
+        if (t2 > 1e-6) {
+            hit_point = p2;
+            return 1;
+        }
+    } else {
+        if (t1 > 1e-6) {
+            hit_point = p1;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int refract_at_surface(
+    point ray_origin,
+    vector ray_dir,
+    float vertex_z,
+    float radius,
+    float semi_aperture,
+    float n1,
+    float n2,
+    output point new_origin,
+    output vector new_dir)
+{
+    // Aperture stop: flat plane intersection, no refraction
+    if (radius == 0.0) {
+        float dz = ray_dir[2];
+        if (abs(dz) < 1e-10)
+            return 0;
+        float t = (vertex_z - ray_origin[2]) / dz;
+        if (t < 1e-6)
+            return 0;
+        new_origin = ray_origin + t * ray_dir;
+        float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
+        if (r > semi_aperture)
+            return 0;
+        new_dir = ray_dir;
+        return 1;
+    }
+
+    float sphere_center_z = vertex_z + radius;
+    point hit = point(0, 0, 0);
+
+    if (!intersect_sphere(ray_origin, ray_dir, sphere_center_z, radius, hit))
+        return 0;
+
+    // Aperture clip
+    float r = sqrt(hit[0] * hit[0] + hit[1] * hit[1]);
+    if (r > semi_aperture)
+        return 0;
+
+    // Surface normal: points from sphere center to hit point
+    vector N = normalize(hit - point(0, 0, sphere_center_z));
+
+    // Flip normal to face the incoming ray
+    vector I = normalize(ray_dir);
+    if (dot(I, N) > 0.0)
+        N = -N;
+
+    float eta = n1 / n2;
+    vector refracted = refract(I, N, eta);
+
+    // TIR check: refract() returns zero vector on total internal reflection
+    if (dot(refracted, refracted) < 1e-10)
+        return 0;
+
+    new_origin = hit;
+    new_dir = refracted;
+    return 1;
+}
+
+int trace_lens_system(
+    point ray_origin,
+    vector ray_dir,
+    float aperture_scale,
+    output point exit_origin,
+    output vector exit_dir)
+{
+    float radii[NUM_SURFACES];
+    float thicknesses[NUM_SURFACES];
+    float iors[NUM_SURFACES];
+    float apertures[NUM_SURFACES];
+    load_lens_data(radii, thicknesses, iors, apertures);
+
+    // Compute vertex z-positions for each surface.
+    // Front element (surface 0) is at the highest z. We place the front
+    // vertex at the total lens length so the rear vertex ends up near z=0.
+    float vertex_z[NUM_SURFACES];
+    float total_length = 0.0;
+    for (int i = 0; i < NUM_SURFACES - 1; i++)
+        total_length += thicknesses[i];
+
+    vertex_z[0] = total_length;
+    for (int i = 1; i < NUM_SURFACES; i++)
+        vertex_z[i] = vertex_z[i - 1] - thicknesses[i - 1];
+
+    point  p = ray_origin;
+    vector d = ray_dir;
+
+    // Trace rear-to-front: surface NUM_SURFACES-1 down to surface 0
+    for (int idx = NUM_SURFACES - 1; idx >= 0; idx--) {
+        float semi_ap = apertures[idx] * 0.5;
+
+        // Scale the aperture stop opening
+        if (radii[idx] == 0.0)
+            semi_ap *= aperture_scale;
+
+        // IOR of medium before this surface (toward sensor)
+        // and after (toward scene) from the ray's perspective (sensor→scene).
+        // iors[i] = IOR of medium to the right of surface i (toward sensor side
+        // in array order, but we're going in reverse).
+        // When tracing sensor→scene (reverse), n1 is on the sensor side of the
+        // surface and n2 is on the scene side.
+        float n1, n2;
+        if (idx < NUM_SURFACES - 1)
+            n1 = iors[idx + 1];  // medium between surface idx+1 and idx
+        else
+            n1 = 1.0;  // air behind the rear element
+
+        if (idx > 0)
+            n2 = iors[idx - 1];  // medium between surface idx and idx-1
+        else
+            n2 = 1.0;  // air in front of the front element
+
+        // Skip refraction at aperture stop
+        if (radii[idx] == 0.0) {
+            n1 = 1.0;
+            n2 = 1.0;
+        }
+
+        point  new_p = point(0, 0, 0);
+        vector new_d = vector(0, 0, 0);
+
+        if (!refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, new_p, new_d))
+            return 0;
+
+        p = new_p;
+        d = new_d;
+    }
+
+    exit_origin = p;
+    exit_dir = d;
+    return 1;
+}
+
+shader lens_camera(
+    float sensor_distance = 55.0
+        [[ string description = "Distance from sensor to rear lens vertex (mm). Controls focus." ]],
+    float aperture_scale = 1.0
+        [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
+    output point position = 0,
+    output vector direction = 0,
+    output color throughput = 1)
+{
+    // Sensor size from Blender camera
+    vector sensor_size = 0;
+    getattribute("cam:sensor_size", sensor_size);
+    float sensor_w = sensor_size[0];
+    float sensor_h = sensor_size[1];
+
+    // Raster position (0-1 range)
+    point raster = camera_shader_raster_position();
+    float rx = raster[0];
+    float ry = raster[1];
+
+    // Random sample for DOF
+    point rnd = camera_shader_random_sample();
+
+    // Compute total lens length to place the sensor
+    float radii[NUM_SURFACES];
+    float thicknesses[NUM_SURFACES];
+    float iors[NUM_SURFACES];
+    float apertures[NUM_SURFACES];
+    load_lens_data(radii, thicknesses, iors, apertures);
+
+    float total_length = 0.0;
+    for (int i = 0; i < NUM_SURFACES - 1; i++)
+        total_length += thicknesses[i];
+
+    // Sensor position: behind the rear lens vertex by sensor_distance
+    // Rear vertex is at z=0 (per our layout), so sensor is at z = -sensor_distance
+    float sensor_z = -sensor_distance;
+
+    // Map raster coordinates to physical sensor position (mm)
+    // Center at origin, flip so image isn't mirrored
+    float sensor_x = (rx - 0.5) * sensor_w;
+    float sensor_y = (ry - 0.5) * sensor_h;
+
+    point sensor_point = point(sensor_x, sensor_y, sensor_z);
+
+    // Sample point on rear lens aperture for DOF
+    float rear_semi_ap = apertures[NUM_SURFACES - 1] * 0.5;
+    float angle = rnd[0] * 2.0 * M_PI;
+    float r_sample = sqrt(rnd[1]) * rear_semi_ap;
+    float ax = r_sample * cos(angle);
+    float ay = r_sample * sin(angle);
+    point aperture_point = point(ax, ay, 0.0);
+
+    // Initial ray: sensor toward rear lens element
+    vector initial_dir = normalize(aperture_point - sensor_point);
+
+    // Trace through the lens system
+    point  exit_origin = point(0, 0, 0);
+    vector exit_dir = vector(0, 0, 0);
+
+    if (trace_lens_system(sensor_point, initial_dir, aperture_scale, exit_origin, exit_dir)) {
+        // Transform from camera space to world space
+        // In our lens space, +Z is toward the scene which maps to -Z in
+        // Blender camera space (camera looks along -Z). We also need to
+        // convert mm to Blender units (meters): multiply by 0.001.
+        point cam_pos = point(-exit_origin[0] * 0.001,
+                               exit_origin[1] * 0.001,
+                              -exit_origin[2] * 0.001);
+        vector cam_dir = vector(-exit_dir[0], exit_dir[1], -exit_dir[2]);
+
+        position  = transform("camera", "world", cam_pos);
+        direction = normalize(transform("camera", "world", cam_dir));
+        throughput = 1.0;
+    } else {
+        throughput = 0.0;
+    }
+}
