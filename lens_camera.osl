@@ -186,6 +186,55 @@ void compute_exit_pupil(
     ep_magnification = abs(1.0 / D);
 }
 
+void compute_field_exit_pupil(
+    float sensor_x, float sensor_y, float sensor_z,
+    float ep_z, float stop_z, float aim_semi_ap,
+    int num_surfaces, int stop_index,
+    float thicknesses[MAX_SURFACES],
+    float apertures[MAX_SURFACES],
+    output float ep_cx, output float ep_cy, output float ep_r)
+{
+    // Chief ray crossing: where a ray from the sensor through the stop center
+    // hits the exit pupil plane
+    float chief_t = (ep_z - sensor_z) / (stop_z - sensor_z);
+    ep_cx = sensor_x * (1.0 - chief_t);
+    ep_cy = sensor_y * (1.0 - chief_t);
+    ep_r = aim_semi_ap;
+
+    // Accumulate z from stop to each rear surface
+    float vz = stop_z;
+    for (int i = stop_index + 1; i < num_surfaces; i++) {
+        vz += thicknesses[i - 1];
+        float semi_ap = apertures[i] * 0.5;
+
+        float t_i = (vz - sensor_z) / (ep_z - sensor_z);
+        if (abs(t_i) < 1e-10)
+            continue;
+
+        // Constraint circle: projection of surface i's aperture onto the EP plane
+        float inv_t = 1.0 / t_i;
+        float cc_x = -sensor_x * (1.0 - t_i) * inv_t;
+        float cc_y = -sensor_y * (1.0 - t_i) * inv_t;
+        float cc_r = semi_ap * abs(inv_t);
+
+        // Largest disk centered at (ep_cx, ep_cy) fitting inside this constraint
+        float dx = ep_cx - cc_x;
+        float dy = ep_cy - cc_y;
+        float dist = sqrt(dx * dx + dy * dy);
+        float max_r = cc_r - dist;
+
+        if (max_r < ep_r)
+            ep_r = max_r;
+    }
+
+    // Safety margin: straight-line projection doesn't account for refraction
+    ep_r *= 1.1;
+    if (ep_r > aim_semi_ap)
+        ep_r = aim_semi_ap;
+    if (ep_r < 0.0)
+        ep_r = 0.0;
+}
+
 int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
 {
     float r = sqrt(x * x + y * y);
@@ -532,6 +581,18 @@ shader lens_camera(
     float aim_z = (ep_magnification > 0.0) ? ep_z : stop_z;
     float aim_semi_ap = (ep_magnification > 0.0) ? stop_semi_ap * ep_magnification : stop_semi_ap;
 
+    float ep_cx = 0.0, ep_cy = 0.0, field_semi_ap = aim_semi_ap;
+    compute_field_exit_pupil(sensor_x, sensor_y, sensor_z,
+                             aim_z, stop_z, aim_semi_ap,
+                             num_surfaces, stop_index,
+                             thicknesses, apertures,
+                             ep_cx, ep_cy, field_semi_ap);
+
+    if (field_semi_ap <= 0.0) {
+        throughput = 0.0;
+        return;
+    }
+
     float blade_rot_rad = blade_rotation * M_PI / 180.0;
     float ax = 0.0;
     float ay = 0.0;
@@ -549,14 +610,17 @@ shader lens_camera(
         }
         float a0 = blade_rot_rad + float(sector) * sector_angle;
         float a1 = blade_rot_rad + float(sector + 1) * sector_angle;
-        ax = u1 * aim_semi_ap * cos(a0) + u2 * aim_semi_ap * cos(a1);
-        ay = u1 * aim_semi_ap * sin(a0) + u2 * aim_semi_ap * sin(a1);
+        ax = u1 * field_semi_ap * cos(a0) + u2 * field_semi_ap * cos(a1);
+        ay = u1 * field_semi_ap * sin(a0) + u2 * field_semi_ap * sin(a1);
     } else {
         float angle = rnd[0] * 2.0 * M_PI;
-        float r_sample = sqrt(r_param) * aim_semi_ap;
+        float r_sample = sqrt(r_param) * field_semi_ap;
         ax = r_sample * cos(angle);
         ay = r_sample * sin(angle);
     }
+
+    ax += ep_cx;
+    ay += ep_cy;
 
     point aperture_point = point(ax, ay, aim_z);
 
