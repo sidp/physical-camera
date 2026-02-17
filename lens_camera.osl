@@ -228,9 +228,10 @@ shader lens_camera(
     float rx = raster[0];
     float ry = raster[1];
 
-    // Map raster coordinates to physical sensor position (mm)
-    float sensor_x = (rx - 0.5) * sensor_w;
-    float sensor_y = (ry - 0.5) * sensor_h;
+    // Map raster coordinates to physical sensor position (mm).
+    // Negate to compensate for lens inversion (real lenses flip the image).
+    float sensor_x = (0.5 - rx) * sensor_w;
+    float sensor_y = (0.5 - ry) * sensor_h;
 
     // Debug mode 1: pinhole camera to verify the framework
     // +Z is the view direction in Blender's OSL camera convention
