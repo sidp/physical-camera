@@ -341,11 +341,18 @@ shader lens_camera(
     // Lens space has -z toward scene; Blender camera space has +z toward scene.
     // Negate z to convert.
     if (ok) {
+        // Throughput weight: cos^4(theta) where theta is the angle between the
+        // initial ray and the optical axis. This models the natural radiometric
+        // falloff of a lens system (illumination cosine law).
+        vector axis = vector(0, 0, -1);
+        float cos_theta = dot(normalize(initial_dir), axis);
+        float weight = cos_theta * cos_theta * cos_theta * cos_theta;
+
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
                          -exit_origin[2] * 0.001);
         direction = normalize(vector(exit_dir[0], exit_dir[1], -exit_dir[2]));
-        throughput = 1.0;
+        throughput = color(weight, weight, weight);
     } else {
         throughput = 0.0;
     }
