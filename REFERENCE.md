@@ -35,7 +35,7 @@ int resolution[2];
 getattribute("cam:resolution", resolution);        // render resolution in pixels
 
 float focal_dist;
-getattribute("cam:focal_distance", focal_dist);    // focal distance in mm
+getattribute("cam:focal_distance", focal_dist);    // focus distance in meters (scene units)
 ```
 
 ### Coordinate transforms

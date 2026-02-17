@@ -73,6 +73,57 @@ float onaxis_fresnel_transmission(
     return T;
 }
 
+float compute_sensor_distance(
+    int num_surfaces,
+    float radii[MAX_SURFACES],
+    float thicknesses[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    float total_length,
+    float focus_mm)
+{
+    // Build ABCD system matrix by front-to-back paraxial ray trace.
+    // Convention: M = [[A,B],[C,D]], initialized to identity.
+    float A = 1.0, B = 0.0, C = 0.0, D = 1.0;
+
+    for (int i = 0; i < num_surfaces; i++) {
+        float n_before = (i == 0) ? 1.0 : iors[i - 1];
+        float n_after = iors[i];
+
+        // Refraction matrix (skip flat surfaces and matching IOR)
+        if (radii[i] != 0.0 && n_before != n_after) {
+            float phi = (n_after - n_before) / radii[i];
+            C -= phi * A;
+            D -= phi * B;
+        }
+
+        // Transfer matrix (skip after last surface)
+        if (i < num_surfaces - 1) {
+            float t = thicknesses[i] / iors[i];
+            A += t * C;
+            B += t * D;
+        }
+    }
+
+    // Fall back to infinity focus if the system has no optical power
+    if (abs(C) < 1e-10)
+        return -A / C;
+
+    float f = -1.0 / C;
+    float bfd = -A / C;
+    float rpp = (1.0 - A) / C;
+    float fpp = (1.0 - D) / C;
+
+    if (focus_mm <= 0.0)
+        return bfd;
+
+    float d_o = focus_mm - total_length + fpp;
+    if (d_o <= f)
+        return bfd;
+
+    float d_i = f * d_o / (d_o - f);
+    return rpp + d_i;
+}
+
 int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
 {
     float r = sqrt(x * x + y * y);
@@ -293,8 +344,6 @@ int trace_lens_system(
 }
 
 shader lens_camera(
-    float sensor_distance = 55.0
-        [[ string description = "Distance from sensor to rear lens vertex (mm). Controls focus." ]],
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
     int lens_type = 0
@@ -314,6 +363,9 @@ shader lens_camera(
     getattribute("cam:sensor_size", sensor_size);
     float sensor_w = sensor_size[0];
     float sensor_h = sensor_size[1];
+
+    float focal_distance = 0.0;
+    getattribute("cam:focal_distance", focal_distance);
 
     // Raster position (0-1 range)
     point raster = camera_shader_raster_position();
@@ -347,6 +399,14 @@ shader lens_camera(
 
     float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, iors);
 
+    float total_length = 0.0;
+    for (int i = 0; i < num_surfaces - 1; i++)
+        total_length += thicknesses[i];
+
+    float focus_mm = focal_distance * 1000.0;
+    float sensor_distance = compute_sensor_distance(
+        num_surfaces, radii, thicknesses, iors, total_length, focus_mm);
+
     // Random sample for DOF and wavelength selection.
     // camera_shader_random_sample() provides two independent uniform values in x/y.
     // We use x for the aperture angle and split y into channel selection + radius.
@@ -357,11 +417,6 @@ shader lens_camera(
     int channel = int(floor(rnd[1] * 3.0));
     if (channel > 2) channel = 2;
     float r_param = rnd[1] * 3.0 - float(channel);
-
-    // Compute total lens length
-    float total_length = 0.0;
-    for (int i = 0; i < num_surfaces - 1; i++)
-        total_length += thicknesses[i];
 
     // Lens layout: rear element at z=0, front element at z=-total_length.
     // Sensor is behind the rear element at z = +sensor_distance.
