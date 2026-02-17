@@ -1,24 +1,32 @@
-#define NUM_SURFACES 11
+#define MAX_SURFACES 24
 
 void load_lens_data(
-    output float radii[NUM_SURFACES],
-    output float thicknesses[NUM_SURFACES],
-    output float iors[NUM_SURFACES],
-    output float apertures[NUM_SURFACES])
+    int lens_type,
+    output float radii[MAX_SURFACES],
+    output float thicknesses[MAX_SURFACES],
+    output float iors[MAX_SURFACES],
+    output float apertures[MAX_SURFACES],
+    output float abbe_v[MAX_SURFACES],
+    output int num_surfaces,
+    output int stop_index)
 {
-    // Double Gauss 50mm f/2 (PBRT, US Patent 2,673,491)
-    // Listed front-to-back (scene-side to sensor-side)
-    radii[0]  =  29.475;  thicknesses[0]  = 3.76;  iors[0]  = 1.67;  apertures[0]  = 25.2;
-    radii[1]  =  84.83;   thicknesses[1]  = 0.12;  iors[1]  = 1.0;   apertures[1]  = 25.2;
-    radii[2]  =  19.275;  thicknesses[2]  = 4.025; iors[2]  = 1.67;  apertures[2]  = 23.0;
-    radii[3]  =  40.77;   thicknesses[3]  = 3.275; iors[3]  = 1.699; apertures[3]  = 23.0;
-    radii[4]  =  12.75;   thicknesses[4]  = 5.705; iors[4]  = 1.0;   apertures[4]  = 18.0;
-    radii[5]  =   0.0;    thicknesses[5]  = 4.5;   iors[5]  = 1.0;   apertures[5]  = 17.1;
-    radii[6]  = -14.495;  thicknesses[6]  = 1.18;  iors[6]  = 1.603; apertures[6]  = 17.0;
-    radii[7]  =  40.77;   thicknesses[7]  = 6.065; iors[7]  = 1.658; apertures[7]  = 20.0;
-    radii[8]  = -20.385;  thicknesses[8]  = 0.19;  iors[8]  = 1.0;   apertures[8]  = 20.0;
-    radii[9]  = 437.065;  thicknesses[9]  = 3.22;  iors[9]  = 1.717; apertures[9]  = 20.0;
-    radii[10] = -39.73;   thicknesses[10] = 0.0;   iors[10] = 1.0;   apertures[10] = 20.0;
+    if (lens_type == 0) {
+        // Double Gauss 50mm f/2 (PBRT, US Patent 2,673,491)
+        // Listed front-to-back (scene-side to sensor-side)
+        num_surfaces = 11;
+        stop_index = 5;
+        radii[0]  =  29.475;  thicknesses[0]  = 3.76;  iors[0]  = 1.67;  apertures[0]  = 25.2;  abbe_v[0]  = 57.0;
+        radii[1]  =  84.83;   thicknesses[1]  = 0.12;  iors[1]  = 1.0;   apertures[1]  = 25.2;  abbe_v[1]  = 0.0;
+        radii[2]  =  19.275;  thicknesses[2]  = 4.025; iors[2]  = 1.67;  apertures[2]  = 23.0;  abbe_v[2]  = 57.0;
+        radii[3]  =  40.77;   thicknesses[3]  = 3.275; iors[3]  = 1.699; apertures[3]  = 23.0;  abbe_v[3]  = 30.0;
+        radii[4]  =  12.75;   thicknesses[4]  = 5.705; iors[4]  = 1.0;   apertures[4]  = 18.0;  abbe_v[4]  = 0.0;
+        radii[5]  =   0.0;    thicknesses[5]  = 4.5;   iors[5]  = 1.0;   apertures[5]  = 17.1;  abbe_v[5]  = 0.0;
+        radii[6]  = -14.495;  thicknesses[6]  = 1.18;  iors[6]  = 1.603; apertures[6]  = 17.0;  abbe_v[6]  = 38.0;
+        radii[7]  =  40.77;   thicknesses[7]  = 6.065; iors[7]  = 1.658; apertures[7]  = 20.0;  abbe_v[7]  = 50.0;
+        radii[8]  = -20.385;  thicknesses[8]  = 0.19;  iors[8]  = 1.0;   apertures[8]  = 20.0;  abbe_v[8]  = 0.0;
+        radii[9]  = 437.065;  thicknesses[9]  = 3.22;  iors[9]  = 1.717; apertures[9]  = 20.0;  abbe_v[9]  = 48.0;
+        radii[10] = -39.73;   thicknesses[10] = 0.0;   iors[10] = 1.0;   apertures[10] = 20.0;  abbe_v[10] = 0.0;
+    }
 }
 
 int intersect_sphere(
@@ -136,6 +144,12 @@ int trace_lens_system(
     point ray_origin,
     vector ray_dir,
     float aperture_scale,
+    int num_surfaces,
+    int stop_index,
+    float radii[MAX_SURFACES],
+    float thicknesses[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    float apertures[MAX_SURFACES],
     output point exit_origin,
     output vector exit_dir,
     output int surfaces_passed,
@@ -143,33 +157,27 @@ int trace_lens_system(
 {
     surfaces_passed = 0;
     failure_type = 0;
-    float radii[NUM_SURFACES];
-    float thicknesses[NUM_SURFACES];
-    float iors[NUM_SURFACES];
-    float apertures[NUM_SURFACES];
-    load_lens_data(radii, thicknesses, iors, apertures);
 
     // Compute vertex z-positions (PBRT convention: front at most negative z,
     // rear at z=0). This ensures sphere curvature pushes off-axis hits away
     // from subsequent surfaces, preventing overshoot at thin air gaps.
-    float vertex_z[NUM_SURFACES];
+    float vertex_z[MAX_SURFACES];
     float total_length = 0.0;
-    for (int i = 0; i < NUM_SURFACES - 1; i++)
+    for (int i = 0; i < num_surfaces - 1; i++)
         total_length += thicknesses[i];
 
     vertex_z[0] = -total_length;
-    for (int i = 1; i < NUM_SURFACES; i++)
+    for (int i = 1; i < num_surfaces; i++)
         vertex_z[i] = vertex_z[i - 1] + thicknesses[i - 1];
 
     point  p = ray_origin;
     vector d = ray_dir;
 
-    // Trace rear-to-front: surface NUM_SURFACES-1 down to surface 0
-    for (int idx = NUM_SURFACES - 1; idx >= 0; idx--) {
+    // Trace rear-to-front: last surface down to surface 0
+    for (int idx = num_surfaces - 1; idx >= 0; idx--) {
         float semi_ap = apertures[idx] * 0.5;
 
-        // Scale the aperture stop opening
-        if (radii[idx] == 0.0)
+        if (idx == stop_index)
             semi_ap *= aperture_scale;
 
         // iors[i] = IOR of the medium between surface i and surface i+1
@@ -179,7 +187,7 @@ int trace_lens_system(
         float n1 = iors[idx];
         float n2 = (idx > 0) ? iors[idx - 1] : 1.0;
 
-        // Skip refraction at aperture stop
+        // No refraction at aperture stop
         if (radii[idx] == 0.0) {
             n1 = 1.0;
             n2 = 1.0;
@@ -211,6 +219,8 @@ shader lens_camera(
         [[ string description = "Distance from sensor to rear lens vertex (mm). Controls focus." ]],
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
+    int lens_type = 0
+        [[ string description = "Lens selection. 0 = Double Gauss 50mm f/2." ]],
     float debug_mode = 0.0
         [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction" ]],
     output point position = 0,
@@ -242,33 +252,37 @@ shader lens_camera(
         return;
     }
 
+    // Load lens data
+    float radii[MAX_SURFACES];
+    float thicknesses[MAX_SURFACES];
+    float iors[MAX_SURFACES];
+    float apertures[MAX_SURFACES];
+    float abbe_v[MAX_SURFACES];
+    int num_surfaces = 0;
+    int stop_index = 0;
+    load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
+                   num_surfaces, stop_index);
+
     // Random sample for DOF
     point rnd = camera_shader_random_sample();
 
-    // Compute total lens length to place the sensor
-    float radii[NUM_SURFACES];
-    float thicknesses[NUM_SURFACES];
-    float iors[NUM_SURFACES];
-    float apertures[NUM_SURFACES];
-    load_lens_data(radii, thicknesses, iors, apertures);
-
+    // Compute total lens length
     float total_length = 0.0;
-    for (int i = 0; i < NUM_SURFACES - 1; i++)
+    for (int i = 0; i < num_surfaces - 1; i++)
         total_length += thicknesses[i];
 
     // Lens layout: rear element at z=0, front element at z=-total_length.
     // Sensor is behind the rear element at z = +sensor_distance.
     float sensor_z = sensor_distance;
-
     point sensor_point = point(sensor_x, sensor_y, sensor_z);
 
-    // Compute the aperture stop's z-position (surface 5)
+    // Compute the aperture stop's z-position
     float stop_z = -total_length;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < stop_index; i++)
         stop_z += thicknesses[i];
 
     // Sample on the aperture stop plane so rays pass through the physical stop
-    float stop_semi_ap = apertures[5] * 0.5 * aperture_scale;
+    float stop_semi_ap = apertures[stop_index] * 0.5 * aperture_scale;
     float angle = rnd[0] * 2.0 * M_PI;
     float r_sample = sqrt(rnd[1]) * stop_semi_ap;
     float ax = r_sample * cos(angle);
@@ -285,19 +299,21 @@ shader lens_camera(
     int failure_type = 0;
 
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
+                               num_surfaces, stop_index,
+                               radii, thicknesses, iors, apertures,
                                exit_origin, exit_dir, surfaces_passed, failure_type);
 
     // Debug mode 2: failure cause diagnostic.
     // White = all passed.
     // Green = aperture clip, Blue = TIR, Red = intersection miss.
-    // Brightness = how far the ray got (surfaces_passed / 11).
+    // Brightness = how far the ray got.
     if (debug_mode >= 1.5 && debug_mode < 2.5) {
         position = point(0, 0, 0);
         direction = normalize(vector(sensor_x, sensor_y, 50.0));
         if (ok) {
             throughput = color(1, 1, 1);
         } else {
-            float brightness = float(surfaces_passed) / float(NUM_SURFACES);
+            float brightness = float(surfaces_passed) / float(num_surfaces);
             float is_clip = (failure_type == 2) ? brightness : 0.0;
             float is_tir = (failure_type == 3) ? brightness : 0.0;
             float is_miss = (failure_type == 1) ? brightness : 0.0;
