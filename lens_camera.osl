@@ -45,6 +45,28 @@ float disperse_ior(float n_d, float v_d, int channel)
     return n_d;                            // green: nominal
 }
 
+float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t)
+{
+    if (n1 == n2)
+        return 1.0;
+    float rs = (n1 * cos_i - n2 * cos_t) / (n1 * cos_i + n2 * cos_t);
+    float rp = (n1 * cos_t - n2 * cos_i) / (n1 * cos_t + n2 * cos_i);
+    return 1.0 - (rs * rs + rp * rp) * 0.5;
+}
+
+int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
+{
+    float r = sqrt(x * x + y * y);
+    if (r < 1e-10)
+        return 1;
+    float sector_angle = 2.0 * M_PI / float(num_blades);
+    float angle = atan2(y, x) - rotation_rad;
+    angle = angle - floor(angle / (2.0 * M_PI)) * 2.0 * M_PI;
+    float theta = mod(angle, sector_angle) - sector_angle * 0.5;
+    float max_r = semi_ap * cos(M_PI / float(num_blades)) / cos(theta);
+    return (r <= max_r) ? 1 : 0;
+}
+
 int intersect_sphere(
     point ray_origin,
     vector ray_dir,
@@ -105,8 +127,11 @@ int refract_at_surface(
     float semi_aperture,
     float n1,
     float n2,
+    int num_blades,
+    float blade_rotation,
     output point new_origin,
-    output vector new_dir)
+    output vector new_dir,
+    output float transmission)
 {
     // Aperture stop: flat plane intersection, no refraction
     if (radius == 0.0) {
@@ -117,10 +142,16 @@ int refract_at_surface(
         if (t < 1e-6)
             return 0;
         new_origin = ray_origin + t * ray_dir;
-        float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
-        if (r > semi_aperture)
-            return -1;
+        if (num_blades >= 3) {
+            if (!point_in_ngon(new_origin[0], new_origin[1], semi_aperture, num_blades, blade_rotation))
+                return -1;
+        } else {
+            float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
+            if (r > semi_aperture)
+                return -1;
+        }
         new_dir = ray_dir;
+        transmission = 1.0;
         return 1;
     }
 
@@ -143,12 +174,16 @@ int refract_at_surface(
     if (dot(I, N) > 0.0)
         N = -N;
 
+    float cos_i = abs(dot(I, N));
     float eta = n1 / n2;
     vector refracted = refract(I, N, eta);
 
     // TIR check: refract() returns zero vector on total internal reflection
     if (dot(refracted, refracted) < 1e-10)
         return -2;
+
+    float cos_t = abs(dot(refracted, N));
+    transmission = (n1 == n2) ? 1.0 : fresnel_transmittance(n1, n2, cos_i, cos_t);
 
     new_origin = hit;
     new_dir = refracted;
@@ -168,13 +203,17 @@ int trace_lens_system(
     float apertures[MAX_SURFACES],
     float abbe_v[MAX_SURFACES],
     int channel,
+    int num_blades,
+    float blade_rotation,
     output point exit_origin,
     output vector exit_dir,
     output int surfaces_passed,
-    output int failure_type)
+    output int failure_type,
+    output float total_transmission)
 {
     surfaces_passed = 0;
     failure_type = 0;
+    total_transmission = 1.0;
 
     // Compute vertex z-positions (PBRT convention: front at most negative z,
     // rear at z=0). This ensures sphere curvature pushes off-axis hits away
@@ -213,8 +252,9 @@ int trace_lens_system(
 
         point  new_p = point(0, 0, 0);
         vector new_d = vector(0, 0, 0);
+        float surface_transmission = 1.0;
 
-        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, new_p, new_d);
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, new_p, new_d, surface_transmission);
         if (result != 1) {
             if (result == 0) failure_type = 1;
             else if (result == -1) failure_type = 2;
@@ -223,6 +263,7 @@ int trace_lens_system(
         }
 
         surfaces_passed += 1;
+        total_transmission *= surface_transmission;
         p = new_p;
         d = new_d;
     }
@@ -239,6 +280,12 @@ shader lens_camera(
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
     int lens_type = 0
         [[ string description = "Lens selection. 0 = Double Gauss 50mm f/2." ]],
+    float exposure_compensation = 0.0
+        [[ string description = "Exposure adjustment in stops. Compensates for light lost to Fresnel reflections and vignetting." ]],
+    int aperture_blades = 0
+        [[ string description = "Number of aperture blades. 0 = circular." ]],
+    float blade_rotation = 0.0
+        [[ string description = "Aperture blade rotation in degrees." ]],
     float debug_mode = 0.0
         [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction" ]],
     output point position = 0,
@@ -309,10 +356,32 @@ shader lens_camera(
 
     // Sample on the aperture stop plane so rays pass through the physical stop
     float stop_semi_ap = apertures[stop_index] * 0.5 * aperture_scale;
-    float angle = rnd[0] * 2.0 * M_PI;
-    float r_sample = sqrt(r_param) * stop_semi_ap;
-    float ax = r_sample * cos(angle);
-    float ay = r_sample * sin(angle);
+    float blade_rot_rad = blade_rotation * M_PI / 180.0;
+    float ax = 0.0;
+    float ay = 0.0;
+
+    if (aperture_blades >= 3) {
+        int n = aperture_blades;
+        float sector_angle = 2.0 * M_PI / float(n);
+        int sector = int(floor(rnd[0] * float(n)));
+        if (sector >= n) sector = n - 1;
+        float u1 = rnd[0] * float(n) - float(sector);
+        float u2 = r_param;
+        if (u1 + u2 > 1.0) {
+            u1 = 1.0 - u1;
+            u2 = 1.0 - u2;
+        }
+        float a0 = blade_rot_rad + float(sector) * sector_angle;
+        float a1 = blade_rot_rad + float(sector + 1) * sector_angle;
+        ax = u1 * stop_semi_ap * cos(a0) + u2 * stop_semi_ap * cos(a1);
+        ay = u1 * stop_semi_ap * sin(a0) + u2 * stop_semi_ap * sin(a1);
+    } else {
+        float angle = rnd[0] * 2.0 * M_PI;
+        float r_sample = sqrt(r_param) * stop_semi_ap;
+        ax = r_sample * cos(angle);
+        ay = r_sample * sin(angle);
+    }
+
     point aperture_point = point(ax, ay, stop_z);
 
     // Initial ray: sensor toward the stop
@@ -323,12 +392,15 @@ shader lens_camera(
     vector exit_dir = vector(0, 0, 0);
     int surfaces_passed = 0;
     int failure_type = 0;
+    float total_transmission = 0.0;
 
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
                                num_surfaces, stop_index,
                                radii, thicknesses, iors, apertures,
                                abbe_v, channel,
-                               exit_origin, exit_dir, surfaces_passed, failure_type);
+                               aperture_blades, blade_rot_rad,
+                               exit_origin, exit_dir, surfaces_passed, failure_type,
+                               total_transmission);
 
     // Debug mode 2: failure cause diagnostic.
     // White = all passed.
@@ -375,9 +447,11 @@ shader lens_camera(
 
         // Each sample traces one wavelength (R, G, or B). Multiply by 3 to
         // compensate for the 1/3 probability of selecting each channel.
-        float wr = (channel == 0) ? weight * 3.0 : 0.0;
-        float wg = (channel == 1) ? weight * 3.0 : 0.0;
-        float wb = (channel == 2) ? weight * 3.0 : 0.0;
+        float exposure = pow(2.0, exposure_compensation);
+        float w = weight * total_transmission * exposure * 3.0;
+        float wr = (channel == 0) ? w : 0.0;
+        float wg = (channel == 1) ? w : 0.0;
+        float wb = (channel == 2) ? w : 0.0;
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
