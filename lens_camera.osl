@@ -54,6 +54,25 @@ float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t)
     return 1.0 - (rs * rs + rp * rp) * 0.5;
 }
 
+float onaxis_fresnel_transmission(
+    int num_surfaces,
+    float radii[MAX_SURFACES],
+    float iors[MAX_SURFACES])
+{
+    float T = 1.0;
+    for (int idx = num_surfaces - 1; idx >= 0; idx--) {
+        if (radii[idx] == 0.0)
+            continue;
+        float n1 = iors[idx];
+        float n2 = (idx > 0) ? iors[idx - 1] : 1.0;
+        if (n1 == n2)
+            continue;
+        float r = (n1 - n2) / (n1 + n2);
+        T *= 1.0 - r * r;
+    }
+    return T;
+}
+
 int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
 {
     float r = sqrt(x * x + y * y);
@@ -280,8 +299,6 @@ shader lens_camera(
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open (f/2)." ]],
     int lens_type = 0
         [[ string description = "Lens selection. 0 = Double Gauss 50mm f/2." ]],
-    float exposure_compensation = 0.0
-        [[ string description = "Exposure adjustment in stops. Compensates for light lost to Fresnel reflections and vignetting." ]],
     int aperture_blades = 0
         [[ string description = "Number of aperture blades. 0 = circular." ]],
     float blade_rotation = 0.0
@@ -327,6 +344,8 @@ shader lens_camera(
     int stop_index = 0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
                    num_surfaces, stop_index);
+
+    float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, iors);
 
     // Random sample for DOF and wavelength selection.
     // camera_shader_random_sample() provides two independent uniform values in x/y.
@@ -447,8 +466,7 @@ shader lens_camera(
 
         // Each sample traces one wavelength (R, G, or B). Multiply by 3 to
         // compensate for the 1/3 probability of selecting each channel.
-        float exposure = pow(2.0, exposure_compensation);
-        float w = weight * total_transmission * exposure * 3.0;
+        float w = weight * (total_transmission / onaxis_T) * 3.0;
         float wr = (channel == 0) ? w : 0.0;
         float wg = (channel == 1) ? w : 0.0;
         float wb = (channel == 2) ? w : 0.0;
