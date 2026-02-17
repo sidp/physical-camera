@@ -125,7 +125,7 @@ float compute_sensor_distance(
     float f = -1.0 / C;
     float bfd = -A / C;
     float rpp = (1.0 - A) / C;
-    float fpp = (1.0 - D) / C;
+    float fpp = (D - 1.0) / C;
 
     if (focus_mm <= 0.0)
         return bfd;
