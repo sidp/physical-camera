@@ -28,7 +28,6 @@ int intersect_sphere(
     float radius,
     output point hit_point)
 {
-    // Sphere center is on the optical axis at (0, 0, sphere_center_z)
     float ox = ray_origin[0];
     float oy = ray_origin[1];
     float oz = ray_origin[2] - sphere_center_z;
@@ -48,7 +47,9 @@ int intersect_sphere(
     float t1 = (-b - sqrt_disc) / (2.0 * a);
     float t2 = (-b + sqrt_disc) / (2.0 * a);
 
-    // Pick the intersection closest to the vertex (sphere_center_z - radius)
+    // Pick the intersection closest to the vertex (sphere_center_z - radius).
+    // Do NOT fall back to the far-side intersection — if the vertex-side hit
+    // is behind the ray, the ray has passed this surface and should be rejected.
     float vertex_z = sphere_center_z - radius;
     point p1 = ray_origin + t1 * ray_dir;
     point p2 = ray_origin + t2 * ray_dir;
@@ -68,22 +69,10 @@ int intersect_sphere(
         }
     }
 
-    // Fallback: try the other solution
-    if (dist1 < dist2) {
-        if (t2 > 1e-6) {
-            hit_point = p2;
-            return 1;
-        }
-    } else {
-        if (t1 > 1e-6) {
-            hit_point = p1;
-            return 1;
-        }
-    }
-
     return 0;
 }
 
+// Returns: 1 = success, 0 = intersection miss, -1 = aperture clip, -2 = TIR
 int refract_at_surface(
     point ray_origin,
     vector ray_dir,
@@ -106,7 +95,7 @@ int refract_at_surface(
         new_origin = ray_origin + t * ray_dir;
         float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
         if (r > semi_aperture)
-            return 0;
+            return -1;
         new_dir = ray_dir;
         return 1;
     }
@@ -120,7 +109,7 @@ int refract_at_surface(
     // Aperture clip
     float r = sqrt(hit[0] * hit[0] + hit[1] * hit[1]);
     if (r > semi_aperture)
-        return 0;
+        return -1;
 
     // Surface normal: points from sphere center to hit point
     vector N = normalize(hit - point(0, 0, sphere_center_z));
@@ -135,39 +124,42 @@ int refract_at_surface(
 
     // TIR check: refract() returns zero vector on total internal reflection
     if (dot(refracted, refracted) < 1e-10)
-        return 0;
+        return -2;
 
     new_origin = hit;
     new_dir = refracted;
     return 1;
 }
 
+// failure_type output: 0 = success, 1 = intersection miss, 2 = aperture clip, 3 = TIR
 int trace_lens_system(
     point ray_origin,
     vector ray_dir,
     float aperture_scale,
     output point exit_origin,
     output vector exit_dir,
-    output int surfaces_passed)
+    output int surfaces_passed,
+    output int failure_type)
 {
     surfaces_passed = 0;
+    failure_type = 0;
     float radii[NUM_SURFACES];
     float thicknesses[NUM_SURFACES];
     float iors[NUM_SURFACES];
     float apertures[NUM_SURFACES];
     load_lens_data(radii, thicknesses, iors, apertures);
 
-    // Compute vertex z-positions for each surface.
-    // Front element (surface 0) is at the highest z. We place the front
-    // vertex at the total lens length so the rear vertex ends up near z=0.
+    // Compute vertex z-positions (PBRT convention: front at most negative z,
+    // rear at z=0). This ensures sphere curvature pushes off-axis hits away
+    // from subsequent surfaces, preventing overshoot at thin air gaps.
     float vertex_z[NUM_SURFACES];
     float total_length = 0.0;
     for (int i = 0; i < NUM_SURFACES - 1; i++)
         total_length += thicknesses[i];
 
-    vertex_z[0] = total_length;
+    vertex_z[0] = -total_length;
     for (int i = 1; i < NUM_SURFACES; i++)
-        vertex_z[i] = vertex_z[i - 1] - thicknesses[i - 1];
+        vertex_z[i] = vertex_z[i - 1] + thicknesses[i - 1];
 
     point  p = ray_origin;
     vector d = ray_dir;
@@ -196,8 +188,13 @@ int trace_lens_system(
         point  new_p = point(0, 0, 0);
         vector new_d = vector(0, 0, 0);
 
-        if (!refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, new_p, new_d))
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, new_p, new_d);
+        if (result != 1) {
+            if (result == 0) failure_type = 1;
+            else if (result == -1) failure_type = 2;
+            else if (result == -2) failure_type = 3;
             return 0;
+        }
 
         surfaces_passed += 1;
         p = new_p;
@@ -258,38 +255,53 @@ shader lens_camera(
     for (int i = 0; i < NUM_SURFACES - 1; i++)
         total_length += thicknesses[i];
 
-    // Sensor position: behind the rear lens vertex by sensor_distance
-    // Rear vertex is at z=0 (per our layout), so sensor is at z = -sensor_distance
-    float sensor_z = -sensor_distance;
+    // Lens layout: rear element at z=0, front element at z=-total_length.
+    // Sensor is behind the rear element at z = +sensor_distance.
+    float sensor_z = sensor_distance;
 
     point sensor_point = point(sensor_x, sensor_y, sensor_z);
 
-    // Sample point on rear lens aperture for DOF
-    float rear_semi_ap = apertures[NUM_SURFACES - 1] * 0.5;
+    // Compute the aperture stop's z-position (surface 5)
+    float stop_z = -total_length;
+    for (int i = 0; i < 5; i++)
+        stop_z += thicknesses[i];
+
+    // Sample on the aperture stop plane so rays pass through the physical stop
+    float stop_semi_ap = apertures[5] * 0.5 * aperture_scale;
     float angle = rnd[0] * 2.0 * M_PI;
-    float r_sample = sqrt(rnd[1]) * rear_semi_ap;
+    float r_sample = sqrt(rnd[1]) * stop_semi_ap;
     float ax = r_sample * cos(angle);
     float ay = r_sample * sin(angle);
-    point aperture_point = point(ax, ay, 0.0);
+    point aperture_point = point(ax, ay, stop_z);
 
-    // Initial ray: sensor toward rear lens element
+    // Initial ray: sensor toward the stop
     vector initial_dir = normalize(aperture_point - sensor_point);
 
     // Trace through the lens system
     point  exit_origin = point(0, 0, 0);
     vector exit_dir = vector(0, 0, 0);
     int surfaces_passed = 0;
+    int failure_type = 0;
 
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
-                               exit_origin, exit_dir, surfaces_passed);
+                               exit_origin, exit_dir, surfaces_passed, failure_type);
 
-    // Debug mode 2: surface count visualization
-    // Bright = more surfaces passed. Use pinhole direction so rays hit the scene.
+    // Debug mode 2: failure cause diagnostic.
+    // White = all passed.
+    // Green = aperture clip, Blue = TIR, Red = intersection miss.
+    // Brightness = how far the ray got (surfaces_passed / 11).
     if (debug_mode >= 1.5 && debug_mode < 2.5) {
-        float t = (float)surfaces_passed / (float)NUM_SURFACES;
         position = point(0, 0, 0);
         direction = normalize(vector(sensor_x, sensor_y, 50.0));
-        throughput = color(t, t, t);
+        if (ok) {
+            throughput = color(1, 1, 1);
+        } else {
+            float brightness = float(surfaces_passed) / float(NUM_SURFACES);
+            float is_clip = (failure_type == 2) ? brightness : 0.0;
+            float is_tir = (failure_type == 3) ? brightness : 0.0;
+            float is_miss = (failure_type == 1) ? brightness : 0.0;
+            throughput = color(is_miss, is_clip, is_tir);
+        }
         return;
     }
 
@@ -308,13 +320,14 @@ shader lens_camera(
         return;
     }
 
-    // Normal mode: output in camera space (Blender applies camera transform)
-    // Lens space +Z = toward scene = camera shader +Z. No axis flips needed.
+    // Normal mode: output in camera space (Blender applies camera transform).
+    // Lens space has -z toward scene; Blender camera space has +z toward scene.
+    // Negate z to convert.
     if (ok) {
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
-                         exit_origin[2] * 0.001);
-        direction = normalize(exit_dir);
+                         -exit_origin[2] * 0.001);
+        direction = normalize(vector(exit_dir[0], exit_dir[1], -exit_dir[2]));
         throughput = 1.0;
     } else {
         throughput = 0.0;
