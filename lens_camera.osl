@@ -29,6 +29,22 @@ void load_lens_data(
     }
 }
 
+// Compute wavelength-dependent IOR using Cauchy-like dispersion from Abbe number.
+// channel: 0 = red (656.3nm, C line), 1 = green (587.6nm, d line), 2 = blue (486.1nm, F line)
+// For air (n_d = 1.0 or abbe_v = 0), returns n_d unchanged.
+float disperse_ior(float n_d, float v_d, int channel)
+{
+    if (v_d < 1.0 || n_d <= 1.0)
+        return n_d;
+
+    // delta = (n_F - n_C) / 2, derived from Abbe number definition: V = (n_d - 1) / (n_F - n_C)
+    float delta = (n_d - 1.0) / (2.0 * v_d);
+
+    if (channel == 0) return n_d - delta;  // red: lower IOR
+    if (channel == 2) return n_d + delta;  // blue: higher IOR
+    return n_d;                            // green: nominal
+}
+
 int intersect_sphere(
     point ray_origin,
     vector ray_dir,
@@ -150,6 +166,8 @@ int trace_lens_system(
     float thicknesses[MAX_SURFACES],
     float iors[MAX_SURFACES],
     float apertures[MAX_SURFACES],
+    float abbe_v[MAX_SURFACES],
+    int channel,
     output point exit_origin,
     output vector exit_dir,
     output int surfaces_passed,
@@ -184,8 +202,8 @@ int trace_lens_system(
         // (toward sensor). When tracing sensor→scene at surface idx:
         // n1 = medium the ray is in (sensor side) = iors[idx]
         // n2 = medium the ray enters (scene side) = iors[idx-1] or air
-        float n1 = iors[idx];
-        float n2 = (idx > 0) ? iors[idx - 1] : 1.0;
+        float n1 = disperse_ior(iors[idx], abbe_v[idx], channel);
+        float n2 = (idx > 0) ? disperse_ior(iors[idx - 1], abbe_v[idx - 1], channel) : 1.0;
 
         // No refraction at aperture stop
         if (radii[idx] == 0.0) {
@@ -263,8 +281,16 @@ shader lens_camera(
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
                    num_surfaces, stop_index);
 
-    // Random sample for DOF
+    // Random sample for DOF and wavelength selection.
+    // camera_shader_random_sample() provides two independent uniform values in x/y.
+    // We use x for the aperture angle and split y into channel selection + radius.
     point rnd = camera_shader_random_sample();
+
+    // Monte Carlo wavelength: pick one of R/G/B per sample.
+    // Split rnd[1] into channel choice (3 bins) and a radius parameter.
+    int channel = int(floor(rnd[1] * 3.0));
+    if (channel > 2) channel = 2;
+    float r_param = rnd[1] * 3.0 - float(channel);
 
     // Compute total lens length
     float total_length = 0.0;
@@ -284,7 +310,7 @@ shader lens_camera(
     // Sample on the aperture stop plane so rays pass through the physical stop
     float stop_semi_ap = apertures[stop_index] * 0.5 * aperture_scale;
     float angle = rnd[0] * 2.0 * M_PI;
-    float r_sample = sqrt(rnd[1]) * stop_semi_ap;
+    float r_sample = sqrt(r_param) * stop_semi_ap;
     float ax = r_sample * cos(angle);
     float ay = r_sample * sin(angle);
     point aperture_point = point(ax, ay, stop_z);
@@ -301,6 +327,7 @@ shader lens_camera(
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
                                num_surfaces, stop_index,
                                radii, thicknesses, iors, apertures,
+                               abbe_v, channel,
                                exit_origin, exit_dir, surfaces_passed, failure_type);
 
     // Debug mode 2: failure cause diagnostic.
@@ -341,18 +368,22 @@ shader lens_camera(
     // Lens space has -z toward scene; Blender camera space has +z toward scene.
     // Negate z to convert.
     if (ok) {
-        // Throughput weight: cos^4(theta) where theta is the angle between the
-        // initial ray and the optical axis. This models the natural radiometric
-        // falloff of a lens system (illumination cosine law).
+        // Throughput weight: cos^4(theta) models natural radiometric falloff.
         vector axis = vector(0, 0, -1);
         float cos_theta = dot(normalize(initial_dir), axis);
         float weight = cos_theta * cos_theta * cos_theta * cos_theta;
+
+        // Each sample traces one wavelength (R, G, or B). Multiply by 3 to
+        // compensate for the 1/3 probability of selecting each channel.
+        float wr = (channel == 0) ? weight * 3.0 : 0.0;
+        float wg = (channel == 1) ? weight * 3.0 : 0.0;
+        float wb = (channel == 2) ? weight * 3.0 : 0.0;
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
                          -exit_origin[2] * 0.001);
         direction = normalize(vector(exit_dir[0], exit_dir[1], -exit_dir[2]));
-        throughput = color(weight, weight, weight);
+        throughput = color(wr, wg, wb);
     } else {
         throughput = 0.0;
     }
