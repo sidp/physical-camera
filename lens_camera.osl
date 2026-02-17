@@ -45,20 +45,42 @@ void load_lens_data(
     }
 }
 
-// Compute wavelength-dependent IOR using Cauchy-like dispersion from Abbe number.
-// channel: 0 = red (656.3nm, C line), 1 = green (587.6nm, d line), 2 = blue (486.1nm, F line)
-// For air (n_d = 1.0 or abbe_v = 0), returns n_d unchanged.
-float disperse_ior(float n_d, float v_d, int channel)
+// Cauchy dispersion: n(λ) = A + B/λ², coefficients derived from n_d and Abbe number.
+float cauchy_ior(float n_d, float v_d, float lambda_nm)
 {
     if (v_d < 1.0 || n_d <= 1.0)
         return n_d;
 
-    // delta = (n_F - n_C) / 2, derived from Abbe number definition: V = (n_d - 1) / (n_F - n_C)
-    float delta = (n_d - 1.0) / (2.0 * v_d);
+    float inv_lF2 = 1.0 / (486.1 * 486.1);
+    float inv_lC2 = 1.0 / (656.3 * 656.3);
+    float inv_ld2 = 1.0 / (587.6 * 587.6);
+    float B = (n_d - 1.0) / (v_d * (inv_lF2 - inv_lC2));
+    float A = n_d - B * inv_ld2;
+    return A + B / (lambda_nm * lambda_nm);
+}
 
-    if (channel == 0) return n_d - delta;  // red: lower IOR
-    if (channel == 2) return n_d + delta;  // blue: higher IOR
-    return n_d;                            // green: nominal
+color wavelength_to_rgb(float lambda)
+{
+    // Wyman et al. 2013 piecewise Gaussian fits to CIE 1931 XYZ
+    float t1 = (lambda - 442.0) * ((lambda < 442.0) ? 0.0624 : 0.0374);
+    float t2 = (lambda - 599.8) * ((lambda < 599.8) ? 0.0264 : 0.0323);
+    float t3 = (lambda - 501.1) * ((lambda < 501.1) ? 0.0490 : 0.0382);
+    float x = 0.362 * exp(-0.5*t1*t1) + 1.056 * exp(-0.5*t2*t2) - 0.065 * exp(-0.5*t3*t3);
+
+    float t4 = (lambda - 568.8) * ((lambda < 568.8) ? 0.0213 : 0.0247);
+    float t5 = (lambda - 530.9) * ((lambda < 530.9) ? 0.0613 : 0.0322);
+    float y = 0.821 * exp(-0.5*t4*t4) + 0.286 * exp(-0.5*t5*t5);
+
+    float t6 = (lambda - 437.0) * ((lambda < 437.0) ? 0.0845 : 0.0278);
+    float t7 = (lambda - 459.0) * ((lambda < 459.0) ? 0.0385 : 0.0725);
+    float z = 1.217 * exp(-0.5*t6*t6) + 0.681 * exp(-0.5*t7*t7);
+
+    // XYZ -> linear sRGB (D65)
+    float r =  3.2406 * x - 1.5372 * y - 0.4986 * z;
+    float g = -0.9689 * x + 1.8758 * y + 0.0415 * z;
+    float b =  0.0557 * x - 0.2040 * y + 1.0570 * z;
+
+    return color(max(r, 0.0), max(g, 0.0), max(b, 0.0));
 }
 
 float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t)
@@ -411,7 +433,7 @@ int trace_lens_system(
     float iors[MAX_SURFACES],
     float apertures[MAX_SURFACES],
     float abbe_v[MAX_SURFACES],
-    int channel,
+    float lambda_nm,
     int num_blades,
     float blade_rotation,
     output point exit_origin,
@@ -450,8 +472,8 @@ int trace_lens_system(
         // (toward sensor). When tracing sensor→scene at surface idx:
         // n1 = medium the ray is in (sensor side) = iors[idx]
         // n2 = medium the ray enters (scene side) = iors[idx-1] or air
-        float n1 = disperse_ior(iors[idx], abbe_v[idx], channel);
-        float n2 = (idx > 0) ? disperse_ior(iors[idx - 1], abbe_v[idx - 1], channel) : 1.0;
+        float n1 = cauchy_ior(iors[idx], abbe_v[idx], lambda_nm);
+        float n2 = (idx > 0) ? cauchy_ior(iors[idx - 1], abbe_v[idx - 1], lambda_nm) : 1.0;
 
         // No refraction at aperture stop
         if (idx == stop_index) {
@@ -493,6 +515,8 @@ shader lens_camera(
         [[ string description = "Number of aperture blades. 0 = circular." ]],
     float blade_rotation = 0.0
         [[ string description = "Aperture blade rotation in degrees." ]],
+    int chromatic_aberration = 1
+        [[ string description = "Enable chromatic aberration (spectral dispersion)." ]],
     float debug_mode = 0.0
         [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction" ]],
     output point position = 0,
@@ -548,16 +572,18 @@ shader lens_camera(
     float sensor_distance = compute_sensor_distance(
         num_surfaces, radii, thicknesses, iors, total_length, focus_mm);
 
-    // Random sample for DOF and wavelength selection.
     // camera_shader_random_sample() provides two independent uniform values in x/y.
-    // We use x for the aperture angle and split y into channel selection + radius.
+    // x = aperture angle, y = wavelength (+ golden-ratio rotation for aperture radius).
     point rnd = camera_shader_random_sample();
 
-    // Monte Carlo wavelength: pick one of R/G/B per sample.
-    // Split rnd[1] into channel choice (3 bins) and a radius parameter.
-    int channel = int(floor(rnd[1] * 3.0));
-    if (channel > 2) channel = 2;
-    float r_param = rnd[1] * 3.0 - float(channel);
+    // Wavelength sampling for chromatic aberration
+    float lambda = 587.6;
+    float r_param = rnd[1];
+    if (chromatic_aberration) {
+        lambda = 400.0 + rnd[1] * 300.0;
+        r_param = rnd[1] + 0.6180339887;
+        r_param = r_param - floor(r_param);
+    }
 
     // Lens layout: rear element at z=0, front element at z=-total_length.
     // Sensor is behind the rear element at z = +sensor_distance.
@@ -637,7 +663,7 @@ shader lens_camera(
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
                                num_surfaces, stop_index,
                                radii, thicknesses, iors, apertures,
-                               abbe_v, channel,
+                               abbe_v, lambda,
                                aperture_blades, blade_rot_rad,
                                exit_origin, exit_dir, surfaces_passed, failure_type,
                                total_transmission);
@@ -685,18 +711,20 @@ shader lens_camera(
         float cos_theta = dot(normalize(initial_dir), axis);
         float weight = cos_theta * cos_theta * cos_theta * cos_theta;
 
-        // Each sample traces one wavelength (R, G, or B). Multiply by 3 to
-        // compensate for the 1/3 probability of selecting each channel.
-        float w = weight * (total_transmission / onaxis_T) * 3.0;
-        float wr = (channel == 0) ? w : 0.0;
-        float wg = (channel == 1) ? w : 0.0;
-        float wb = (channel == 2) ? w : 0.0;
+        float w = weight * (total_transmission / onaxis_T);
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
                          -exit_origin[2] * 0.001);
         direction = normalize(vector(exit_dir[0], exit_dir[1], -exit_dir[2]));
-        throughput = color(wr, wg, wb);
+
+        if (chromatic_aberration) {
+            color spectral_norm = color(1.7050, 2.5996, 2.7576);
+            color rgb_w = wavelength_to_rgb(lambda) * spectral_norm;
+            throughput = color(w * rgb_w[0], w * rgb_w[1], w * rgb_w[2]);
+        } else {
+            throughput = color(w, w, w);
+        }
     } else {
         throughput = 0.0;
     }
