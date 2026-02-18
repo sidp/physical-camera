@@ -465,7 +465,7 @@ shader lens_camera(
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open." ]],
     int lens_type = 0
-        [[ string description = "Lens selection. 0 = Double Gauss 50mm f/2, 1 = Double Gauss 100mm f/1.7." ]],
+        [[ string description = "Lens selection index (see add-on UI for available lenses)." ]],
     int aperture_blades = 0
         [[ string description = "Number of aperture blades. 0 = circular." ]],
     float blade_rotation = 0.0
