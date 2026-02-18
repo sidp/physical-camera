@@ -416,8 +416,31 @@ int trace_lens_system(
     point  p = ray_origin;
     vector d = ray_dir;
 
+    // State saved before flat surfaces for sphere-overlap retry
+    point pre_flat_p = point(0, 0, 0);
+    vector pre_flat_d = vector(0, 0, 0);
+    float pre_flat_transmission = 0.0;
+    int pre_flat_surfaces = 0;
+    int pre_flat_idx = -1;
+
     // Trace rear-to-front: last surface down to surface 0
+    int skip_surface = 0;
     for (int idx = num_surfaces - 1; idx >= 0; idx--) {
+        if (skip_surface) {
+            skip_surface = 0;
+            pre_flat_idx = -1;
+            continue;
+        }
+
+        // Save ray state before flat surfaces for sphere-overlap retry
+        if (radii[idx] == 0.0) {
+            pre_flat_p = p;
+            pre_flat_d = d;
+            pre_flat_transmission = total_transmission;
+            pre_flat_surfaces = surfaces_passed;
+            pre_flat_idx = idx;
+        }
+
         float semi_ap = apertures[idx] * 0.5;
 
         if (idx == stop_index)
@@ -444,6 +467,86 @@ int trace_lens_system(
 
         int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, new_p, new_d, surface_transmission);
         if (result != 1) {
+            // Mirror case of the overshoot below: a flat surface was
+            // processed first but the next curved surface's sphere
+            // extends past it, making the sphere unreachable. Retry
+            // from the pre-flat position, then project to the flat
+            // surface for the aperture check.
+            if (radii[idx] != 0.0 && pre_flat_idx == idx + 1) {
+                p = pre_flat_p;
+                d = pre_flat_d;
+                total_transmission = pre_flat_transmission;
+                surfaces_passed = pre_flat_surfaces;
+                pre_flat_idx = -1;
+
+                result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, new_p, new_d, surface_transmission);
+                if (result != 1) {
+                    if (result == 0) failure_type = 1;
+                    else if (result == -1) failure_type = 2;
+                    else if (result == -2) failure_type = 3;
+                    return 0;
+                }
+
+                surfaces_passed += 1;
+                total_transmission *= surface_transmission;
+                p = new_p;
+                d = new_d;
+
+                int flat_idx = idx + 1;
+                float flat_z = vertex_z[flat_idx];
+                float flat_semi_ap = apertures[flat_idx] * 0.5;
+                int flat_is_stop = (flat_idx == stop_index) ? 1 : 0;
+
+                if (flat_is_stop)
+                    flat_semi_ap *= aperture_scale;
+
+                float check_x = p[0];
+                float check_y = p[1];
+                if (abs(d[2]) > 1e-10) {
+                    float t_proj = (flat_z - p[2]) / d[2];
+                    check_x = p[0] + t_proj * d[0];
+                    check_y = p[1] + t_proj * d[1];
+                }
+
+                if (flat_is_stop && num_blades >= 3) {
+                    if (!point_in_ngon(check_x, check_y, flat_semi_ap, num_blades, blade_rotation)) {
+                        failure_type = 2;
+                        return 0;
+                    }
+                } else {
+                    float r_check = sqrt(check_x * check_x + check_y * check_y);
+                    if (r_check > flat_semi_ap) {
+                        failure_type = 2;
+                        return 0;
+                    }
+                }
+
+                p = point(check_x, check_y, flat_z);
+
+                if (!flat_is_stop) {
+                    float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
+                    float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
+                    if (fn1 != fn2) {
+                        vector fN = vector(0, 0, -1);
+                        vector fI = normalize(d);
+                        if (dot(fI, fN) > 0.0)
+                            fN = -fN;
+                        float fcos_i = abs(dot(fI, fN));
+                        vector refr = refract(fI, fN, fn1 / fn2);
+                        if (dot(refr, refr) < 1e-10) {
+                            failure_type = 3;
+                            return 0;
+                        }
+                        float fcos_t = abs(dot(refr, fN));
+                        total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t);
+                        d = refr;
+                    }
+                }
+
+                surfaces_passed += 1;
+                continue;
+            }
+
             if (result == 0) failure_type = 1;
             else if (result == -1) failure_type = 2;
             else if (result == -2) failure_type = 3;
@@ -454,6 +557,71 @@ int trace_lens_system(
         total_transmission *= surface_transmission;
         p = new_p;
         d = new_d;
+
+        if (radii[idx] != 0.0)
+            pre_flat_idx = -1;
+
+        // A strongly curved surface close to a flat surface can have its
+        // sphere extend past the flat surface's vertex. When the hit point
+        // overshoots, project the refracted ray back to the flat surface's
+        // plane for the aperture check — this gives the correct air-side
+        // position where light physically crosses the flat surface.
+        if (idx > 0 && radii[idx - 1] == 0.0 && p[2] < vertex_z[idx - 1]) {
+            int next_idx = idx - 1;
+            float flat_z = vertex_z[next_idx];
+            float next_semi_ap = apertures[next_idx] * 0.5;
+            int next_is_stop = (next_idx == stop_index) ? 1 : 0;
+
+            if (next_is_stop)
+                next_semi_ap *= aperture_scale;
+
+            // Project refracted ray back to the flat surface plane
+            float check_x = p[0];
+            float check_y = p[1];
+            if (abs(d[2]) > 1e-10) {
+                float t_proj = (flat_z - p[2]) / d[2];
+                check_x = p[0] + t_proj * d[0];
+                check_y = p[1] + t_proj * d[1];
+            }
+
+            if (next_is_stop && num_blades >= 3) {
+                if (!point_in_ngon(check_x, check_y, next_semi_ap, num_blades, blade_rotation)) {
+                    failure_type = 2;
+                    return 0;
+                }
+            } else {
+                float r_check = sqrt(check_x * check_x + check_y * check_y);
+                if (r_check > next_semi_ap) {
+                    failure_type = 2;
+                    return 0;
+                }
+            }
+
+            p = point(check_x, check_y, flat_z);
+
+            if (!next_is_stop) {
+                float fn1 = cauchy_ior(iors[next_idx], abbe_v[next_idx], lambda_nm);
+                float fn2 = (next_idx > 0) ? cauchy_ior(iors[next_idx - 1], abbe_v[next_idx - 1], lambda_nm) : 1.0;
+                if (fn1 != fn2) {
+                    vector fN = vector(0, 0, -1);
+                    vector fI = normalize(d);
+                    if (dot(fI, fN) > 0.0)
+                        fN = -fN;
+                    float fcos_i = abs(dot(fI, fN));
+                    vector refr = refract(fI, fN, fn1 / fn2);
+                    if (dot(refr, refr) < 1e-10) {
+                        failure_type = 3;
+                        return 0;
+                    }
+                    float fcos_t = abs(dot(refr, fN));
+                    total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t);
+                    d = refr;
+                }
+            }
+
+            surfaces_passed += 1;
+            skip_surface = 1;
+        }
     }
 
     exit_origin = p;
