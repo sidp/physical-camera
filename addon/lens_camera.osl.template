@@ -517,8 +517,6 @@ shader lens_camera(
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
                    num_surfaces, stop_index);
 
-    float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, iors);
-
     float total_length = 0.0;
     for (int i = 0; i < num_surfaces - 1; i++)
         total_length += thicknesses[i];
@@ -540,6 +538,15 @@ shader lens_camera(
         r_param = r_param - floor(r_param);
     }
 
+    // Compute wavelength-adjusted IOR for exit pupil aiming and Fresnel
+    // normalization. Lenses with high dispersion shift the exit pupil at
+    // extreme wavelengths; d-line-only aiming causes intersection misses.
+    float dispersed_iors[MAX_SURFACES];
+    for (int i = 0; i < num_surfaces; i++)
+        dispersed_iors[i] = cauchy_ior(iors[i], abbe_v[i], lambda);
+
+    float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, dispersed_iors);
+
     // Lens layout: rear element at z=0, front element at z=-total_length.
     // Sensor is behind the rear element at z = +sensor_distance.
     float sensor_z = sensor_distance;
@@ -557,7 +564,7 @@ shader lens_camera(
 
     float ep_z = 0.0;
     float ep_magnification = 1.0;
-    compute_exit_pupil(num_surfaces, stop_index, radii, thicknesses, iors,
+    compute_exit_pupil(num_surfaces, stop_index, radii, thicknesses, dispersed_iors,
                        ep_z, ep_magnification);
     float aim_z = (ep_magnification > 0.0) ? ep_z : stop_z;
     float aim_semi_ap = (ep_magnification > 0.0) ? stop_semi_ap * ep_magnification : stop_semi_ap;
