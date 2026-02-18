@@ -12,13 +12,26 @@ from bpy.props import (
 
 from . import generator
 
+_TEXT_BLOCK_NAME = "Physical Lens OSL"
+
 _lens_registry: list[dict] = []
 _lens_items: list[tuple] = []
-_generated_osl_path: str = ""
+_osl_source: str = ""
 
 
 def _get_lens_items(self, context):
     return _lens_items
+
+
+def _get_or_create_text_block():
+    """Get or create the text datablock containing the generated OSL shader."""
+    if _TEXT_BLOCK_NAME in bpy.data.texts:
+        text = bpy.data.texts[_TEXT_BLOCK_NAME]
+    else:
+        text = bpy.data.texts.new(_TEXT_BLOCK_NAME)
+    text.clear()
+    text.write(_osl_source)
+    return text
 
 
 def sync_to_cycles(cam):
@@ -123,8 +136,9 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
 def _is_using_physical_lens(cam):
     return (
         cam.type == 'CUSTOM'
-        and cam.custom_mode == 'EXTERNAL'
-        and cam.custom_filepath == _generated_osl_path
+        and cam.custom_mode == 'INTERNAL'
+        and cam.custom_shader is not None
+        and cam.custom_shader.name == _TEXT_BLOCK_NAME
     )
 
 
@@ -143,12 +157,33 @@ class CAMERA_OT_apply_physical_lens(bpy.types.Operator):
 
     def execute(self, context):
         cam = context.object.data
+        text = _get_or_create_text_block()
         cam.type = 'CUSTOM'
-        cam.custom_mode = 'EXTERNAL'
-        cam.custom_filepath = _generated_osl_path
+        cam.custom_mode = 'INTERNAL'
+        cam.custom_shader = text
         lens_index = int(cam.physical_camera.lens)
         _sync_focal_length(cam, lens_index)
         sync_to_cycles(cam)
+        return {'FINISHED'}
+
+
+class CAMERA_OT_disable_physical_lens(bpy.types.Operator):
+    bl_idname = "camera.disable_physical_lens"
+    bl_label = "Disable Physical Lens"
+    bl_description = "Revert to a standard perspective camera"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'CAMERA'
+            and _is_using_physical_lens(context.object.data)
+        )
+
+    def execute(self, context):
+        cam = context.object.data
+        cam.type = 'PERSP'
         return {'FINISHED'}
 
 
@@ -199,25 +234,34 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
 _classes = (
     PhysicalCameraProperties,
     CAMERA_OT_apply_physical_lens,
+    CAMERA_OT_disable_physical_lens,
     CAMERA_PT_physical_lens,
 )
 
 
+def _draw_object_context_menu(self, context):
+    if (
+        context.object is not None
+        and context.object.type == 'CAMERA'
+        and _is_using_physical_lens(context.object.data)
+    ):
+        self.layout.separator()
+        self.layout.operator("camera.disable_physical_lens")
+
+
 def register():
-    global _lens_registry, _lens_items, _generated_osl_path
+    global _lens_registry, _lens_items, _osl_source
 
     addon_dir = Path(__file__).parent
     template_path = addon_dir / "lens_camera.osl.template"
     lens_dir = addon_dir / "lenses"
-    output_dir = Path(bpy.utils.extension_path_user(__package__, create=True))
-    output_path = output_dir / "lens_camera.osl"
 
-    lenses = generator.generate_osl(template_path, lens_dir, output_path)
+    osl_source, lenses = generator.generate_osl(template_path, lens_dir)
+    _osl_source = osl_source
     _lens_registry = lenses
     _lens_items = [
         (str(i), lens["name"], "") for i, lens in enumerate(lenses)
     ]
-    _generated_osl_path = str(output_path)
 
     for cls in _classes:
         bpy.utils.register_class(cls)
@@ -225,9 +269,11 @@ def register():
     bpy.types.Camera.physical_camera = bpy.props.PointerProperty(
         type=PhysicalCameraProperties
     )
+    bpy.types.OUTLINER_MT_object.append(_draw_object_context_menu)
 
 
 def unregister():
+    bpy.types.OUTLINER_MT_object.remove(_draw_object_context_menu)
     del bpy.types.Camera.physical_camera
 
     for cls in reversed(_classes):

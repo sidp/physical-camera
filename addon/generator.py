@@ -79,9 +79,9 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
 
 
 def generate_osl(
-    template_path: Path, lens_dir: Path, output_path: Path
-) -> list[dict]:
-    """Generate OSL shader from template + TOML lenses. Returns lens metadata."""
+    template_path: Path, lens_dir: Path
+) -> tuple[str, list[dict]]:
+    """Generate OSL source from template + TOML lenses. Returns (source, lenses)."""
     lenses = load_lenses(lens_dir)
     if not lenses:
         raise ValueError(f"No .toml lens files found in {lens_dir}")
@@ -90,7 +90,4 @@ def generate_osl(
     lens_data_block = _generate_load_lens_data(lenses)
     osl_source = template.replace("// {{LENS_DATA}}", lens_data_block)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(osl_source)
-
-    return lenses
+    return osl_source, lenses
