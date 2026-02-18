@@ -501,7 +501,7 @@ shader lens_camera(
     // +Z is the view direction in Blender's OSL camera convention
     if (debug_mode >= 0.5 && debug_mode < 1.5) {
         position = point(0, 0, 0);
-        direction = normalize(vector(sensor_x, sensor_y, 50.0));
+        direction = normalize(vector(-sensor_x, -sensor_y, 50.0));
         throughput = 1.0;
         return;
     }
@@ -629,7 +629,7 @@ shader lens_camera(
     // Brightness = how far the ray got.
     if (debug_mode >= 1.5 && debug_mode < 2.5) {
         position = point(0, 0, 0);
-        direction = normalize(vector(sensor_x, sensor_y, 50.0));
+        direction = normalize(vector(-sensor_x, -sensor_y, 50.0));
         if (ok) {
             throughput = color(1, 1, 1);
         } else {
@@ -647,7 +647,7 @@ shader lens_camera(
         if (ok) {
             vector d_norm = normalize(exit_dir);
             position = point(0, 0, 0);
-            direction = normalize(vector(sensor_x, sensor_y, 50.0));
+            direction = normalize(vector(-sensor_x, -sensor_y, 50.0));
             throughput = color(d_norm[0] * 0.5 + 0.5,
                                d_norm[1] * 0.5 + 0.5,
                                d_norm[2] * 0.5 + 0.5);
