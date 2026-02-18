@@ -11,7 +11,7 @@ from bpy.props import (
     IntProperty,
 )
 
-from . import diagram, generator
+from . import codegen, diagram
 
 _TEXT_BLOCK_NAME = "Physical Lens OSL"
 
@@ -297,14 +297,14 @@ def register():
     template_path = addon_dir / "lens_camera.osl.template"
     lens_dir = addon_dir / "lenses"
 
-    osl_source, lenses = generator.generate_osl(template_path, lens_dir)
+    osl_source, lenses = codegen.generate_osl(template_path, lens_dir)
     _osl_source = osl_source
     _lens_registry = lenses
     _lens_items = [
         (str(i), lens["name"], "") for i, lens in enumerate(lenses)
     ]
 
-    diagram.generate_previews(_lens_registry)
+    diagram.load_previews(_lens_registry)
 
     for cls in _classes:
         bpy.utils.register_class(cls)
