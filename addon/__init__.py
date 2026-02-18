@@ -11,7 +11,7 @@ from bpy.props import (
     IntProperty,
 )
 
-from . import generator
+from . import diagram, generator
 
 _TEXT_BLOCK_NAME = "Physical Lens OSL"
 
@@ -217,6 +217,13 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
         layout.prop(props, "lens")
 
         lens_index = int(props.lens) if props.lens else 0
+
+        icon_id = diagram.get_icon_id(lens_index)
+        if icon_id:
+            row = layout.row()
+            row.alignment = 'CENTER'
+            row.template_icon(icon_value=icon_id, scale=8.0)
+
         if lens_index < len(_lens_registry):
             max_fstop = _lens_registry[lens_index]["max_fstop"]
             layout.prop(props, "fstop", text=f"f-stop (min f/{max_fstop})")
@@ -275,6 +282,8 @@ def register():
         (str(i), lens["name"], "") for i, lens in enumerate(lenses)
     ]
 
+    diagram.generate_previews(_lens_registry)
+
     for cls in _classes:
         bpy.utils.register_class(cls)
 
@@ -286,6 +295,7 @@ def register():
 
 
 def unregister():
+    diagram.cleanup()
     bpy.app.handlers.load_post.remove(_on_load_post)
     bpy.types.OUTLINER_MT_object.remove(_draw_object_context_menu)
     del bpy.types.Camera.physical_camera
