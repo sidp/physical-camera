@@ -755,8 +755,12 @@ shader lens_camera(
     float ax = 0.0;
     float ay = 0.0;
 
-    if (aperture_blades >= 3) {
-        int n = aperture_blades;
+    // Always use ngon sampling: the barycentric mixing of both random
+    // dimensions into the radial component prevents wavelength-radius
+    // correlation that causes color casts with chromatic aberration.
+    // For circular aperture (blades=0), use 128-gon as a proxy.
+    {
+        int n = (aperture_blades >= 3) ? aperture_blades : 128;
         float sector_angle = 2.0 * M_PI / float(n);
         int sector = int(floor(rnd[0] * float(n)));
         if (sector >= n) sector = n - 1;
@@ -770,11 +774,6 @@ shader lens_camera(
         float a1 = blade_rot_rad + float(sector + 1) * sector_angle;
         ax = u1 * field_semi_ap * cos(a0) + u2 * field_semi_ap * cos(a1);
         ay = u1 * field_semi_ap * sin(a0) + u2 * field_semi_ap * sin(a1);
-    } else {
-        float angle = rnd[0] * 2.0 * M_PI;
-        float r_sample = sqrt(r_param) * field_semi_ap;
-        ax = r_sample * cos(angle);
-        ay = r_sample * sin(angle);
     }
 
     ax += ep_cx;
