@@ -11,7 +11,7 @@ from bpy.props import (
     IntProperty,
 )
 
-from . import generator
+from . import codegen, diagram
 
 _TEXT_BLOCK_NAME = "Physical Lens OSL"
 
@@ -22,6 +22,10 @@ _osl_source: str = ""
 
 def _get_lens_items(self, context):
     return _lens_items
+
+
+def _lens_index(props):
+    return int(props.lens) if props.lens else 0
 
 
 def _get_or_create_text_block():
@@ -43,7 +47,7 @@ def sync_to_cycles(cam):
         return
 
     props = cam.physical_camera
-    lens_index = int(props.lens)
+    lens_index = _lens_index(props)
 
     custom["lens_type"] = lens_index
     custom["aperture_blades"] = props.aperture_blades
@@ -67,7 +71,7 @@ def _sync_focal_length(cam, lens_index):
 
 
 def _on_lens_change(self, context):
-    lens_index = int(self.lens)
+    lens_index = _lens_index(self)
     if lens_index < len(_lens_registry):
         max_fstop = _lens_registry[lens_index]["max_fstop"]
         if self.fstop < max_fstop:
@@ -162,7 +166,7 @@ class CAMERA_OT_apply_physical_lens(bpy.types.Operator):
         cam.type = 'CUSTOM'
         cam.custom_mode = 'INTERNAL'
         cam.custom_shader = text
-        lens_index = int(cam.physical_camera.lens)
+        lens_index = _lens_index(cam.physical_camera)
         _sync_focal_length(cam, lens_index)
         sync_to_cycles(cam)
         return {'FINISHED'}
@@ -216,7 +220,8 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
 
         layout.prop(props, "lens")
 
-        lens_index = int(props.lens) if props.lens else 0
+        lens_index = _lens_index(props)
+
         if lens_index < len(_lens_registry):
             max_fstop = _lens_registry[lens_index]["max_fstop"]
             layout.prop(props, "fstop", text=f"f-stop (min f/{max_fstop})")
@@ -232,11 +237,40 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
         layout.prop(props, "debug_mode")
 
 
+class CAMERA_PT_physical_lens_diagram(bpy.types.Panel):
+    bl_label = "Lens Diagram"
+    bl_idname = "CAMERA_PT_physical_lens_diagram"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
+    bl_parent_id = "CAMERA_PT_physical_lens"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'CAMERA'
+            and _is_using_physical_lens(context.object.data)
+            and diagram.has_previews()
+        )
+
+    def draw(self, context):
+        props = context.object.data.physical_camera
+        lens_index = _lens_index(props)
+        icon_id = diagram.get_icon_id(lens_index)
+        if icon_id:
+            row = self.layout.row()
+            row.alignment = 'CENTER'
+            row.template_icon(icon_value=icon_id, scale=8.0)
+
+
 _classes = (
     PhysicalCameraProperties,
     CAMERA_OT_apply_physical_lens,
     CAMERA_OT_disable_physical_lens,
     CAMERA_PT_physical_lens,
+    CAMERA_PT_physical_lens_diagram,
 )
 
 
@@ -268,12 +302,14 @@ def register():
     template_path = addon_dir / "lens_camera.osl.template"
     lens_dir = addon_dir / "lenses"
 
-    osl_source, lenses = generator.generate_osl(template_path, lens_dir)
+    osl_source, lenses = codegen.generate_osl(template_path, lens_dir)
     _osl_source = osl_source
     _lens_registry = lenses
     _lens_items = [
         (str(i), lens["name"], "") for i, lens in enumerate(lenses)
     ]
+
+    diagram.load_previews(_lens_registry)
 
     for cls in _classes:
         bpy.utils.register_class(cls)
@@ -286,6 +322,7 @@ def register():
 
 
 def unregister():
+    diagram.cleanup()
     bpy.app.handlers.load_post.remove(_on_load_post)
     bpy.types.OUTLINER_MT_object.remove(_draw_object_context_menu)
     del bpy.types.Camera.physical_camera

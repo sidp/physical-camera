@@ -17,8 +17,10 @@ There are two main parts:
 - `MAX_SURFACES` is defined as 24 — any new lens must fit within this limit
 
 ### Blender Addon (`addon/`)
-- `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `generator.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
-- `generator.py` — Reads TOML lens files from `addon/lenses/`, generates the `load_lens_data()` function, and injects it into the OSL template
+- `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `codegen.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
+- `lenses.py` — Reads TOML lens files from `addon/lenses/` into dicts (no bpy dependency, shared by the build script)
+- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template
+- `diagram.py` — Loads pre-rendered lens diagram PNGs from `addon/previews/` as Blender preview icons
 - `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop, stop_index) and `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v)
 - `blender_manifest.toml` — Blender extension manifest
 
@@ -28,6 +30,7 @@ There are two main parts:
 2. Surface data uses the PBRT convention: radii of curvature in mm, positive = center of curvature toward the sensor
 3. The `stop_index` is the 0-based index of the aperture stop surface (radius=0, ior=1.0)
 4. Lens files are loaded alphabetically — the filename determines the enum order in the UI
+5. Regenerate lens diagram PNGs: `uv run scripts/build_diagrams.py`
 
 ## Shader Function Pipeline
 
