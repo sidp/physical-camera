@@ -218,12 +218,6 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
 
         lens_index = int(props.lens) if props.lens else 0
 
-        icon_id = diagram.get_icon_id(lens_index)
-        if icon_id:
-            row = layout.row()
-            row.alignment = 'CENTER'
-            row.template_icon(icon_value=icon_id, scale=8.0)
-
         if lens_index < len(_lens_registry):
             max_fstop = _lens_registry[lens_index]["max_fstop"]
             layout.prop(props, "fstop", text=f"f-stop (min f/{max_fstop})")
@@ -239,11 +233,39 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
         layout.prop(props, "debug_mode")
 
 
+class CAMERA_PT_physical_lens_diagram(bpy.types.Panel):
+    bl_label = "Lens Diagram"
+    bl_idname = "CAMERA_PT_physical_lens_diagram"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
+    bl_parent_id = "CAMERA_PT_physical_lens"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'CAMERA'
+            and _is_using_physical_lens(context.object.data)
+        )
+
+    def draw(self, context):
+        props = context.object.data.physical_camera
+        lens_index = int(props.lens) if props.lens else 0
+        icon_id = diagram.get_icon_id(lens_index)
+        if icon_id:
+            row = self.layout.row()
+            row.alignment = 'CENTER'
+            row.template_icon(icon_value=icon_id, scale=8.0)
+
+
 _classes = (
     PhysicalCameraProperties,
     CAMERA_OT_apply_physical_lens,
     CAMERA_OT_disable_physical_lens,
     CAMERA_PT_physical_lens,
+    CAMERA_PT_physical_lens_diagram,
 )
 
 
