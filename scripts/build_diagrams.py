@@ -24,9 +24,9 @@ _PADDING = 24 * _SUPERSAMPLE
 _BG_COLOR = (0, 0, 0, 0)
 _GLASS_FILL = (128, 179, 230, 89)
 _SURFACE_LINE = (217, 217, 217, 255)
-_CEMENTED_LINE = (166, 166, 166, 153)
+_CEMENTED_LINE = (217, 217, 217, 128)
 _STOP_COLOR = (217, 217, 217, 255)
-_AXIS_COLOR = (128, 128, 128, 89)
+_AXIS_COLOR = (255, 255, 255, 140)
 
 
 def _compute_vertex_positions(surfaces):
@@ -99,6 +99,24 @@ def _element_polygon(surfaces, positions, front_i, back_i, to_px):
     return polygon
 
 
+def _draw_dashed_line(draw, x0, y0, x1, y1, color, width, dash=8, gap=6):
+    dx = x1 - x0
+    dy = y1 - y0
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1:
+        return
+    nx, ny = dx / length, dy / length
+    pos = 0.0
+    while pos < length:
+        end = min(pos + dash, length)
+        draw.line(
+            [(x0 + nx * pos, y0 + ny * pos), (x0 + nx * end, y0 + ny * end)],
+            fill=color,
+            width=width,
+        )
+        pos = end + gap
+
+
 def _draw_arc(draw, vertex_x, radius, semi_ap, to_px, color, width):
     points = _arc_points(vertex_x, radius, semi_ap, to_px)
     draw.line(points, fill=color, width=width)
@@ -130,10 +148,10 @@ def _render_lens(surfaces):
         return (px, py)
 
     # Optical axis
-    draw.line(
-        [(_PADDING * 0.5, y_center), (size - _PADDING * 0.5, y_center)],
-        fill=_AXIS_COLOR,
-        width=1 * _SUPERSAMPLE,
+    _draw_dashed_line(
+        draw, _PADDING * 0.5, y_center, size - _PADDING * 0.5, y_center,
+        _AXIS_COLOR, 1 * _SUPERSAMPLE,
+        dash=8 * _SUPERSAMPLE, gap=6 * _SUPERSAMPLE,
     )
 
     # Fill glass elements
