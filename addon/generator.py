@@ -23,11 +23,17 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{toml_path.name}: {len(surfaces)} surfaces exceeds "
                 f"MAX_SURFACES ({MAX_SURFACES})"
             )
+        stop_index = lens["stop_index"]
+        if not (0 <= stop_index < len(surfaces)):
+            raise ValueError(
+                f"{toml_path.name}: stop_index {stop_index} is out of range "
+                f"for {len(surfaces)} surfaces"
+            )
         lenses.append({
             "name": lens["name"],
             "focal_length": lens["focal_length"],
             "max_fstop": lens["max_fstop"],
-            "stop_index": lens["stop_index"],
+            "stop_index": stop_index,
             "surfaces": surfaces,
         })
     return lenses
@@ -73,6 +79,14 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         lines.append(f"        stop_index = {lens['stop_index']};")
         lines.append(_format_surface_assignments(lens["surfaces"]))
         lines.append("    }")
+
+    default = lenses[0]
+    lines.append("    else {")
+    lines.append(f"        // Fallback to {default['name']}")
+    lines.append(f"        num_surfaces = {len(default['surfaces'])};")
+    lines.append(f"        stop_index = {default['stop_index']};")
+    lines.append(_format_surface_assignments(default["surfaces"]))
+    lines.append("    }")
 
     lines.append("}")
     return "\n".join(lines)

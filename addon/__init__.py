@@ -55,7 +55,7 @@ def sync_to_cycles(cam):
 
     if lens_index < len(_lens_registry):
         max_fstop = _lens_registry[lens_index]["max_fstop"]
-        custom["aperture_scale"] = max_fstop / props.fstop
+        custom["aperture_scale"] = min(max_fstop / props.fstop, 1.0)
     else:
         custom["aperture_scale"] = 1.0
 
