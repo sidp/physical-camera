@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import bpy
+from bpy.app.handlers import persistent
 from bpy.props import (
     BoolProperty,
     EnumProperty,
@@ -249,6 +250,17 @@ def _draw_object_context_menu(self, context):
         self.layout.operator("camera.disable_physical_lens")
 
 
+@persistent
+def _on_load_post(_):
+    """Update the shader text block and reassign to cameras after file load."""
+    if _TEXT_BLOCK_NAME not in bpy.data.texts:
+        return
+    text = _get_or_create_text_block()
+    for cam in bpy.data.cameras:
+        if _is_using_physical_lens(cam):
+            cam.custom_shader = text
+
+
 def register():
     global _lens_registry, _lens_items, _osl_source
 
@@ -270,9 +282,11 @@ def register():
         type=PhysicalCameraProperties
     )
     bpy.types.OUTLINER_MT_object.append(_draw_object_context_menu)
+    bpy.app.handlers.load_post.append(_on_load_post)
 
 
 def unregister():
+    bpy.app.handlers.load_post.remove(_on_load_post)
     bpy.types.OUTLINER_MT_object.remove(_draw_object_context_menu)
     del bpy.types.Camera.physical_camera
 
