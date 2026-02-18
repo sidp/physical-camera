@@ -10,6 +10,7 @@ _preview_collection = None
 def load_previews(lenses):
     """Load pre-rendered PNG diagrams into a preview collection."""
     global _preview_collection
+    cleanup()
     _preview_collection = bpy.utils.previews.new()
     previews_dir = Path(__file__).parent / "previews"
     for i, lens in enumerate(lenses):
@@ -21,7 +22,7 @@ def load_previews(lenses):
 
 def has_previews():
     """Return whether any diagram previews are loaded."""
-    return bool(_preview_collection)
+    return _preview_collection is not None and len(_preview_collection) > 0
 
 
 def get_icon_id(lens_index):
