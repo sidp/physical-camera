@@ -33,7 +33,8 @@ def sync_to_cycles(cam):
 
     custom["lens_type"] = lens_index
     custom["aperture_blades"] = props.aperture_blades
-    custom["blade_rotation"] = props.blade_rotation
+    from math import degrees
+    custom["blade_rotation"] = degrees(props.blade_rotation)
     custom["chromatic_aberration"] = 1 if props.chromatic_aberration else 0
 
     debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0}
@@ -89,11 +90,10 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
     )
     blade_rotation: FloatProperty(
         name="Blade Rotation",
+        subtype='ANGLE',
         min=0.0,
-        max=360.0,
+        max=6.2831853,
         default=0.0,
-        precision=1,
-        subtype='NONE',
         update=_on_property_change,
     )
     chromatic_aberration: BoolProperty(
