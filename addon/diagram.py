@@ -1,10 +1,15 @@
 """Render lens cross-section diagrams into Blender preview icons."""
 
 import math
+import threading
 
+import bpy.app.timers
 import bpy.utils.previews
 
 _preview_collection = None
+_render_thread = None
+_pending_buffers = []
+_pending_lock = threading.Lock()
 _ICON_SIZE = 256
 _SUPERSAMPLE = 2
 _RENDER_SIZE = _ICON_SIZE * _SUPERSAMPLE
@@ -278,20 +283,51 @@ def _render_lens(surfaces):
     return _downsample(buf)
 
 
-def generate_previews(lenses):
-    """Pre-render lens diagrams into a preview collection."""
-    global _preview_collection
-    _preview_collection = bpy.utils.previews.new()
+def _render_all(lenses):
+    """Render all lens diagrams and queue the buffers for the main thread."""
     for i, lens in enumerate(lenses):
+        buf = _render_lens(lens["surfaces"])
+        with _pending_lock:
+            _pending_buffers.append((i, buf))
+
+
+def _apply_pending():
+    """Timer callback: apply finished renders to the preview collection."""
+    with _pending_lock:
+        batch = _pending_buffers[:]
+        _pending_buffers.clear()
+
+    for i, buf in batch:
         key = f"lens_{i}"
         preview = _preview_collection.new(key)
         preview.image_size = (_ICON_SIZE, _ICON_SIZE)
-        buf = _render_lens(lens["surfaces"])
         preview.image_pixels_float[:] = buf
+
+    if _render_thread is not None and _render_thread.is_alive():
+        return 0.05
+    # Final drain in case anything arrived between the last check and join
+    with _pending_lock:
+        for i, buf in _pending_buffers:
+            key = f"lens_{i}"
+            preview = _preview_collection.new(key)
+            preview.image_size = (_ICON_SIZE, _ICON_SIZE)
+            preview.image_pixels_float[:] = buf
+        _pending_buffers.clear()
+    return None
+
+
+def generate_previews(lenses):
+    """Start background rendering of lens diagrams."""
+    global _preview_collection, _render_thread
+    _preview_collection = bpy.utils.previews.new()
+    _render_thread = threading.Thread(target=_render_all, args=(lenses,),
+                                      daemon=True)
+    _render_thread.start()
+    bpy.app.timers.register(_apply_pending, first_interval=0.05)
 
 
 def get_icon_id(lens_index):
-    """Return the preview icon_id for a given lens index."""
+    """Return the preview icon_id for a given lens index, or 0 if not yet ready."""
     if _preview_collection is None:
         return 0
     key = f"lens_{lens_index}"
@@ -301,8 +337,15 @@ def get_icon_id(lens_index):
 
 
 def cleanup():
-    """Remove the preview collection."""
-    global _preview_collection
+    """Wait for background rendering to finish and remove the preview collection."""
+    global _preview_collection, _render_thread
+    if _render_thread is not None:
+        _render_thread.join()
+        _render_thread = None
+    if bpy.app.timers.is_registered(_apply_pending):
+        bpy.app.timers.unregister(_apply_pending)
+    with _pending_lock:
+        _pending_buffers.clear()
     if _preview_collection is not None:
         bpy.utils.previews.remove(_preview_collection)
         _preview_collection = None
