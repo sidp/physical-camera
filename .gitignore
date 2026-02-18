@@ -2,4 +2,5 @@
 *.blend*
 __pycache__/
 Renders/
+Textures/
 *.local.json
