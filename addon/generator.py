@@ -25,6 +25,7 @@ def load_lenses(lens_dir: Path) -> list[dict]:
             )
         lenses.append({
             "name": lens["name"],
+            "focal_length": lens["focal_length"],
             "max_fstop": lens["max_fstop"],
             "stop_index": lens["stop_index"],
             "surfaces": surfaces,

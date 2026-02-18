@@ -1,6 +1,7 @@
 [lens]
 name = "Double Gauss 50mm f/2"
 patent = "US Patent 2,673,491"
+focal_length = 50.0
 max_fstop = 2.0
 stop_index = 5
 

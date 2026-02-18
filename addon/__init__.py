@@ -47,6 +47,11 @@ def sync_to_cycles(cam):
         custom["aperture_scale"] = 1.0
 
 
+def _sync_focal_length(cam, lens_index):
+    if lens_index < len(_lens_registry):
+        cam.lens = _lens_registry[lens_index]["focal_length"]
+
+
 def _on_lens_change(self, context):
     lens_index = int(self.lens)
     if lens_index < len(_lens_registry):
@@ -55,6 +60,7 @@ def _on_lens_change(self, context):
             self.fstop = max_fstop
     cam = context.object.data if context.object else None
     if cam:
+        _sync_focal_length(cam, lens_index)
         sync_to_cycles(cam)
 
 
@@ -140,6 +146,8 @@ class CAMERA_OT_apply_physical_lens(bpy.types.Operator):
         cam.type = 'CUSTOM'
         cam.custom_mode = 'EXTERNAL'
         cam.custom_filepath = _generated_osl_path
+        lens_index = int(cam.physical_camera.lens)
+        _sync_focal_length(cam, lens_index)
         sync_to_cycles(cam)
         return {'FINISHED'}
 
