@@ -1,0 +1,77 @@
+# CLAUDE.md
+
+## Project Overview
+
+Physical Camera — a Blender extension that replaces Blender's built-in camera with a physically-based lens simulation using OSL (Open Shading Language). Rays are traced backwards through real lens prescriptions (spherical surfaces, aperture stops, Fresnel transmission, chromatic dispersion) to produce realistic depth of field, bokeh, and aberrations.
+
+Requires Blender 4.5+ with Cycles and OSL enabled.
+
+## Architecture
+
+There are two main parts:
+
+### OSL Shader (`addon/lens_camera.osl.template`)
+- The template has a `// {{LENS_DATA}}` placeholder that gets replaced with generated lens data at addon registration time
+- The shader implements backward ray tracing (sensor → scene) through a multi-surface lens system using ABCD matrix optics for focus computation and exit pupil aiming
+- Surfaces are listed front-to-back but traced rear-to-front (sensor side first)
+- `MAX_SURFACES` is defined as 24 — any new lens must fit within this limit
+
+### Blender Addon (`addon/`)
+- `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `generator.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
+- `generator.py` — Reads TOML lens files from `addon/lenses/`, generates the `load_lens_data()` function, and injects it into the OSL template
+- `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop, stop_index) and `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v)
+- `blender_manifest.toml` — Blender extension manifest
+
+## Adding a New Lens
+
+1. Create a new `.toml` file in `addon/lenses/` following the existing format
+2. Surface data uses the PBRT convention: radii of curvature in mm, positive = center of curvature toward the sensor
+3. The `stop_index` is the 0-based index of the aperture stop surface (radius=0, ior=1.0)
+4. Lens files are loaded alphabetically — the filename determines the enum order in the UI
+
+## Shader Function Pipeline
+
+1. `load_lens_data()` — generated at registration; selects lens prescription by index
+2. `compute_sensor_distance()` — ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance
+3. `compute_exit_pupil()` — ABCD matrix for rear subsystem to find exit pupil position/magnification
+4. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures
+5. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element
+6. `refract_at_surface()` — ray-sphere intersection, aperture clip, Snell's law refraction, Fresnel transmittance
+
+Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel loss against on-axis transmission. When chromatic aberration is enabled, wavelength is sampled uniformly over 400–700nm with golden-ratio decorrelation for the aperture radius sample.
+
+## Coordinate System
+
+- Lens space: rear element vertex at z=0, front element at z=-total_length, sensor at z=+sensor_distance
+- Lens space has -z toward the scene; Blender camera space has +z toward the scene
+- Output conversion: z is negated and mm are converted to meters (×0.001)
+- Sphere centers sit at `vertex_z + radius` along the optical axis
+- Ray-sphere intersection picks the hit closest to the vertex (not the far side)
+
+## Key Conventions
+
+- All lens dimensions are in millimeters within the shader; Blender's camera space uses meters
+- `iors[i]` represents the medium *after* surface i (toward sensor), not before it
+- The aperture stop surface has `radius=0` and `ior=1.0`; it clips rays but does not refract
+- Sensor distance is computed via ABCD paraxial optics from Blender's `cam:focal_distance`
+- Fresnel transmission is tracked per-surface and normalized against on-axis transmission for exposure compensation
+
+## OSL Language Constraints (Blender/Cycles)
+
+- **CPU and OptiX only** — no CUDA, HIP, or Metal
+- No structs — use parallel arrays or multiple variables
+- No `#include` — everything in one `.osl` file
+- No file I/O — lens data must be hardcoded or generated into the source
+- Fixed-size arrays only — size must be a compile-time constant (`#define` works)
+- Array shader parameters have a UI bug — values set in the UI may not reach the shader; hardcode arrays inside functions instead
+- `refract(I, N, eta)` returns zero vector on TIR; `I` must be normalized; `N` must face the incoming ray; `eta = n1/n2`
+- Functions must be declared before use (no forward declarations)
+
+## Blender OSL Camera API
+
+The shader entry point must output `position`, `direction`, and `throughput` (set throughput to 0 to kill a ray). Key built-in functions:
+- `camera_shader_raster_position()` — normalized sensor position (0–1)
+- `camera_shader_random_sample()` — two uniform random values in x/y
+- `getattribute("cam:sensor_size", ...)` — physical sensor dimensions in mm
+- `getattribute("cam:focal_distance", ...)` — focus distance in meters
+
