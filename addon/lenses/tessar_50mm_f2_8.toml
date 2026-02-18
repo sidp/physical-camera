@@ -1,0 +1,62 @@
+[lens]
+name = "Tessar 50mm f/2.8"
+patent = "US Patent 4,213,674 (Olympus, 1980, Embodiment 1)"
+focal_length = 50.0
+max_fstop = 2.8
+stop_index = 4
+
+[[surface]]
+radius = 18.95
+thickness = 5.38
+ior = 1.7725
+aperture = 22.0
+abbe_v = 49.6
+
+[[surface]]
+radius = 49.22
+thickness = 3.987
+ior = 1.0
+aperture = 22.0
+abbe_v = 0.0
+
+[[surface]]
+radius = -51.165
+thickness = 1.12
+ior = 1.72825
+aperture = 16.0
+abbe_v = 28.5
+
+[[surface]]
+radius = 17.383
+thickness = 0.572
+ior = 1.0
+aperture = 16.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 1.0
+ior = 1.0
+aperture = 17.86
+abbe_v = 0.0
+
+[[surface]]
+radius = 88.548
+thickness = 1.12
+ior = 1.50137
+aperture = 18.0
+abbe_v = 56.4
+
+[[surface]]
+radius = 18.755
+thickness = 5.631
+ior = 1.7859
+aperture = 18.0
+abbe_v = 44.2
+
+[[surface]]
+radius = -32.2
+thickness = 0.0
+ior = 1.0
+aperture = 18.0
+abbe_v = 0.0
