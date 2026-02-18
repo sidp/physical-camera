@@ -1,0 +1,83 @@
+[lens]
+name = "Sonnar 50mm f/1.5"
+patent = "French Patent FR837,616 (Bertele/Zeiss, 1937)"
+focal_length = 50.0
+max_fstop = 1.5
+stop_index = 6
+
+[[surface]]
+radius = 34.605
+thickness = 4.665
+ior = 1.671
+aperture = 33.5
+abbe_v = 47.2
+
+[[surface]]
+radius = 216.92
+thickness = 0.19
+ior = 1.0
+aperture = 33.3
+abbe_v = 0.0
+
+[[surface]]
+radius = 17.93
+thickness = 5.905
+ior = 1.671
+aperture = 28.7
+abbe_v = 47.2
+
+[[surface]]
+radius = 42.935
+thickness = 3.525
+ior = 1.4892
+aperture = 26.9
+abbe_v = 70.1
+
+[[surface]]
+radius = -323.155
+thickness = 0.95
+ior = 1.7394
+aperture = 25.5
+abbe_v = 28.2
+
+[[surface]]
+radius = 11.755
+thickness = 6.5
+ior = 1.0
+aperture = 19.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 1.12
+ior = 1.0
+aperture = 18.4
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 1.24
+ior = 1.5232
+aperture = 19.4
+abbe_v = 50.9
+
+[[surface]]
+radius = 25.545
+thickness = 9.905
+ior = 1.6578
+aperture = 19.4
+abbe_v = 51.2
+
+[[surface]]
+radius = -11.06
+thickness = 2.285
+ior = 1.5894
+aperture = 19.5
+abbe_v = 61.2
+
+[[surface]]
+radius = -51.565
+thickness = 0.0
+ior = 1.0
+aperture = 23.8
+abbe_v = 0.0
