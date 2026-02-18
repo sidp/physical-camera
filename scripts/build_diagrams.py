@@ -27,6 +27,11 @@ _SURFACE_LINE = (217, 217, 217, 255)
 _CEMENTED_LINE = (217, 217, 217, 128)
 _STOP_COLOR = (217, 217, 217, 255)
 _AXIS_COLOR = (255, 255, 255, 140)
+_RAY_COLOR = (255, 190, 100, 160)
+
+
+def _is_stop(s):
+    return s["radius"] == 0.0 and s["ior"] <= 1.0
 
 
 def _compute_vertex_positions(surfaces):
@@ -122,6 +127,96 @@ def _draw_arc(draw, vertex_x, radius, semi_ap, to_px, color, width):
     draw.line(points, fill=color, width=width)
 
 
+def _trace_ray(surfaces, positions, start_y):
+    """Trace a parallel ray at given height through the lens. Returns point list or None."""
+    ox = positions[0] - positions[-1] * 0.1
+    oy = start_y
+    dx, dy = 1.0, 0.0
+
+    points = [(ox, oy)]
+    n1 = 1.0
+
+    for i, s in enumerate(surfaces):
+        vx = positions[i]
+        radius = s["radius"]
+        semi_ap = s["aperture"] * 0.5
+        n2 = s["ior"]
+
+        if radius == 0.0:
+            if abs(dx) < 1e-12:
+                return None
+            t = (vx - ox) / dx
+            if t < 1e-6:
+                n1 = n2
+                continue
+            hx = ox + t * dx
+            hy = oy + t * dy
+            if abs(hy) > semi_ap:
+                return None
+            points.append((hx, hy))
+            ox, oy = hx, hy
+            n1 = n2
+            continue
+
+        # Ray-sphere intersection
+        cx = vx + radius
+        ex, ey = ox - cx, oy
+        a = dx * dx + dy * dy
+        b = 2 * (ex * dx + ey * dy)
+        c = ex * ex + ey * ey - radius * radius
+        disc = b * b - 4 * a * c
+        if disc < 0:
+            return None
+        sqrt_disc = math.sqrt(disc)
+        t1 = (-b - sqrt_disc) / (2 * a)
+        t2 = (-b + sqrt_disc) / (2 * a)
+
+        # Pick hit closest to vertex
+        h1x = ox + t1 * dx
+        h2x = ox + t2 * dx
+        if t1 > 1e-6 and (t2 <= 1e-6 or abs(h1x - vx) <= abs(h2x - vx)):
+            t = t1
+        elif t2 > 1e-6:
+            t = t2
+        else:
+            return None
+
+        hx = ox + t * dx
+        hy = oy + t * dy
+        if abs(hy) > semi_ap:
+            return None
+        points.append((hx, hy))
+
+        # Surface normal facing against the ray
+        inv_r = 1.0 / abs(radius)
+        nx = (hx - cx) * inv_r
+        ny = hy * inv_r
+        if nx * dx + ny * dy > 0:
+            nx, ny = -nx, -ny
+
+        # Snell's law
+        if n2 != n1:
+            eta = n1 / n2
+            cos_i = -(dx * nx + dy * ny)
+            sin2_t = eta * eta * (1 - cos_i * cos_i)
+            if sin2_t > 1.0:
+                return None
+            cos_t = math.sqrt(1 - sin2_t)
+            dx = eta * dx + (eta * cos_i - cos_t) * nx
+            dy = eta * dy + (eta * cos_i - cos_t) * ny
+            length = math.sqrt(dx * dx + dy * dy)
+            dx /= length
+            dy /= length
+
+        ox, oy = hx, hy
+        n1 = n2
+
+    # Extend past last surface
+    extend = positions[-1] * 0.3
+    points.append((ox + dx * extend, oy + dy * extend))
+    return points
+
+
 def _render_lens(surfaces):
     size = _RENDER_SIZE
     img = Image.new("RGBA", (size, size), _BG_COLOR)
@@ -162,7 +257,7 @@ def _render_lens(surfaces):
 
     # Draw surface arcs
     for i, s in enumerate(surfaces):
-        if s["radius"] == 0.0 and s["ior"] <= 1.0:
+        if _is_stop(s):
             continue
         semi_ap = s["aperture"] * 0.5
         is_cemented = False
@@ -197,7 +292,7 @@ def _render_lens(surfaces):
 
     # Draw aperture stop
     for i, s in enumerate(surfaces):
-        if s["radius"] == 0.0 and s["ior"] <= 1.0:
+        if _is_stop(s):
             stop_x = positions[i]
             semi_ap = s["aperture"] * 0.5
             notch = semi_ap * 0.15
@@ -216,6 +311,44 @@ def _render_lens(surfaces):
                     fill=_STOP_COLOR,
                     width=4 * _SUPERSAMPLE,
                 )
+
+    # Trace example rays
+    first_semi_ap = surfaces[0]["aperture"] * 0.5
+    clip_left = _PADDING * 0.5
+    clip_right = size - _PADDING * 0.5
+    for frac in (0.7, 0.5, 0.35, -0.35, -0.5, -0.7):
+        ray_pts = _trace_ray(surfaces, positions, frac * first_semi_ap)
+        if ray_pts and len(ray_pts) >= 2:
+            px_pts = [to_px(x, y) for x, y in ray_pts]
+            # Clip to drawing area
+            clipped = []
+            for j in range(len(px_pts) - 1):
+                ax, ay = px_pts[j]
+                bx, by = px_pts[j + 1]
+                dx = bx - ax
+                if abs(dx) < 1e-6:
+                    if clip_left <= ax <= clip_right:
+                        clipped.append((ax, ay))
+                        if j == len(px_pts) - 2:
+                            clipped.append((bx, by))
+                    continue
+                if ax < clip_left:
+                    if bx <= clip_left:
+                        continue
+                    t = (clip_left - ax) / dx
+                    ax = clip_left
+                    ay = ay + t * (by - ay)
+                if bx > clip_right:
+                    if ax >= clip_right:
+                        continue
+                    t = (clip_right - ax) / dx
+                    bx = clip_right
+                    by = ay + t * (by - ay)
+                clipped.append((ax, ay))
+                if j == len(px_pts) - 2:
+                    clipped.append((bx, by))
+            if len(clipped) >= 2:
+                draw.line(clipped, fill=_RAY_COLOR, width=1 * _SUPERSAMPLE)
 
     return img.resize((_ICON_SIZE, _ICON_SIZE), Image.LANCZOS)
 

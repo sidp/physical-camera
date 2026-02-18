@@ -24,6 +24,10 @@ def _get_lens_items(self, context):
     return _lens_items
 
 
+def _lens_index(props):
+    return int(props.lens) if props.lens else 0
+
+
 def _get_or_create_text_block():
     """Get or create the text datablock containing the generated OSL shader."""
     if _TEXT_BLOCK_NAME in bpy.data.texts:
@@ -43,7 +47,7 @@ def sync_to_cycles(cam):
         return
 
     props = cam.physical_camera
-    lens_index = int(props.lens)
+    lens_index = _lens_index(props)
 
     custom["lens_type"] = lens_index
     custom["aperture_blades"] = props.aperture_blades
@@ -67,7 +71,7 @@ def _sync_focal_length(cam, lens_index):
 
 
 def _on_lens_change(self, context):
-    lens_index = int(self.lens)
+    lens_index = _lens_index(self)
     if lens_index < len(_lens_registry):
         max_fstop = _lens_registry[lens_index]["max_fstop"]
         if self.fstop < max_fstop:
@@ -162,7 +166,7 @@ class CAMERA_OT_apply_physical_lens(bpy.types.Operator):
         cam.type = 'CUSTOM'
         cam.custom_mode = 'INTERNAL'
         cam.custom_shader = text
-        lens_index = int(cam.physical_camera.lens)
+        lens_index = _lens_index(cam.physical_camera)
         _sync_focal_length(cam, lens_index)
         sync_to_cycles(cam)
         return {'FINISHED'}
@@ -216,7 +220,7 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
 
         layout.prop(props, "lens")
 
-        lens_index = int(props.lens) if props.lens else 0
+        lens_index = _lens_index(props)
 
         if lens_index < len(_lens_registry):
             max_fstop = _lens_registry[lens_index]["max_fstop"]
@@ -248,11 +252,12 @@ class CAMERA_PT_physical_lens_diagram(bpy.types.Panel):
             context.object is not None
             and context.object.type == 'CAMERA'
             and _is_using_physical_lens(context.object.data)
+            and diagram.has_previews()
         )
 
     def draw(self, context):
         props = context.object.data.physical_camera
-        lens_index = int(props.lens) if props.lens else 0
+        lens_index = _lens_index(props)
         icon_id = diagram.get_icon_id(lens_index)
         if icon_id:
             row = self.layout.row()

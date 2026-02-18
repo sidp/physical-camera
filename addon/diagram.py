@@ -19,6 +19,11 @@ def load_previews(lenses):
             _preview_collection.load(key, str(png_path), 'IMAGE')
 
 
+def has_previews():
+    """Return whether any diagram previews are loaded."""
+    return bool(_preview_collection)
+
+
 def get_icon_id(lens_index):
     """Return the preview icon_id for a given lens index, or 0 if not ready."""
     if _preview_collection is None:
