@@ -38,19 +38,37 @@ color wavelength_to_rgb(float lambda)
     return color(max(r, 0.0), max(g, 0.0), max(b, 0.0));
 }
 
-float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t)
+float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float coating)
 {
     if (n1 == n2)
         return 1.0;
     float rs = (n1 * cos_i - n2 * cos_t) / (n1 * cos_i + n2 * cos_t);
     float rp = (n1 * cos_t - n2 * cos_i) / (n1 * cos_t + n2 * cos_i);
-    return 1.0 - (rs * rs + rp * rp) * 0.5;
+    float R = (rs * rs + rp * rp) * 0.5;
+
+    if (coating > 0.5 && min(n1, n2) < 1.01) {
+        float nc = 1.38;
+        float lo = min(n1, n2);
+        float hi = max(n1, n2);
+        float r1 = (lo - nc) / (lo + nc);
+        float r2 = (nc - hi) / (nc + hi);
+        float denom = 1.0 - r1 * r2;
+        float R_coated = (r1 - r2) * (r1 - r2) / (denom * denom);
+        float R_bare_normal = (lo - hi) * (lo - hi) / ((lo + hi) * (lo + hi));
+        float reduction = (R_bare_normal > 1e-10) ? 1.0 - R_coated / R_bare_normal : 0.0;
+        if (coating > 1.5)
+            reduction = max(reduction, 0.99);
+        R *= (1.0 - reduction);
+    }
+
+    return 1.0 - R;
 }
 
 float onaxis_fresnel_transmission(
     int num_surfaces,
     float radii[MAX_SURFACES],
-    float iors[MAX_SURFACES])
+    float iors[MAX_SURFACES],
+    float coating)
 {
     float T = 1.0;
     for (int idx = num_surfaces - 1; idx >= 0; idx--) {
@@ -58,8 +76,23 @@ float onaxis_fresnel_transmission(
         float n2 = (idx > 0) ? iors[idx - 1] : 1.0;
         if (n1 == n2)
             continue;
-        float r = (n1 - n2) / (n1 + n2);
-        T *= 1.0 - r * r;
+        float R = (n1 - n2) * (n1 - n2) / ((n1 + n2) * (n1 + n2));
+
+        if (coating > 0.5 && min(n1, n2) < 1.01) {
+            float nc = 1.38;
+            float lo = min(n1, n2);
+            float hi = max(n1, n2);
+            float r1 = (lo - nc) / (lo + nc);
+            float r2 = (nc - hi) / (nc + hi);
+            float denom = 1.0 - r1 * r2;
+            float R_coated = (r1 - r2) * (r1 - r2) / (denom * denom);
+            float reduction = (R > 1e-10) ? 1.0 - R_coated / R : 0.0;
+            if (coating > 1.5)
+                reduction = max(reduction, 0.99);
+            R *= (1.0 - reduction);
+        }
+
+        T *= 1.0 - R;
     }
     return T;
 }
@@ -288,6 +321,7 @@ int refract_at_surface(
     int num_blades,
     float blade_rotation,
     int is_stop,
+    float coating,
     output point new_origin,
     output vector new_dir,
     output float transmission)
@@ -336,7 +370,7 @@ int refract_at_surface(
         if (dot(refracted, refracted) < 1e-10)
             return -2;
         float cos_t = abs(dot(refracted, N));
-        transmission = fresnel_transmittance(n1, n2, cos_i, cos_t);
+        transmission = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
         new_dir = refracted;
         return 1;
     }
@@ -369,7 +403,7 @@ int refract_at_surface(
         return -2;
 
     float cos_t = abs(dot(refracted, N));
-    transmission = (n1 == n2) ? 1.0 : fresnel_transmittance(n1, n2, cos_i, cos_t);
+    transmission = (n1 == n2) ? 1.0 : fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
 
     new_origin = hit;
     new_dir = refracted;
@@ -391,6 +425,7 @@ int trace_lens_system(
     float lambda_nm,
     int num_blades,
     float blade_rotation,
+    float coating,
     output point exit_origin,
     output vector exit_dir,
     output int surfaces_passed,
@@ -465,7 +500,7 @@ int trace_lens_system(
         vector new_d = vector(0, 0, 0);
         float surface_transmission = 1.0;
 
-        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, new_p, new_d, surface_transmission);
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
         if (result != 1) {
             // Mirror case of the overshoot below: a flat surface was
             // processed first but the next curved surface's sphere
@@ -479,7 +514,7 @@ int trace_lens_system(
                 surfaces_passed = pre_flat_surfaces;
                 pre_flat_idx = -1;
 
-                result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, new_p, new_d, surface_transmission);
+                result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
                 if (result != 1) {
                     if (result == 0) failure_type = 1;
                     else if (result == -1) failure_type = 2;
@@ -539,7 +574,7 @@ int trace_lens_system(
                             return 0;
                         }
                         float fcos_t = abs(dot(refr, fN));
-                        total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t);
+                        total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
                         d = refr;
                     }
                 }
@@ -616,7 +651,7 @@ int trace_lens_system(
                         return 0;
                     }
                     float fcos_t = abs(dot(refr, fN));
-                    total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t);
+                    total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
                     d = refr;
                 }
             }
@@ -684,8 +719,9 @@ shader lens_camera(
     float abbe_v[MAX_SURFACES];
     int num_surfaces = 0;
     int stop_index = 0;
+    float coating = 0.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
-                   num_surfaces, stop_index);
+                   num_surfaces, stop_index, coating);
 
     float total_length = 0.0;
     for (int i = 0; i < num_surfaces - 1; i++)
@@ -715,7 +751,7 @@ shader lens_camera(
     for (int i = 0; i < num_surfaces; i++)
         dispersed_iors[i] = cauchy_ior(iors[i], abbe_v[i], lambda);
 
-    float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, dispersed_iors);
+    float onaxis_T = onaxis_fresnel_transmission(num_surfaces, radii, dispersed_iors, coating);
 
     // Lens layout: rear element at z=0, front element at z=-total_length.
     // Sensor is behind the rear element at z = +sensor_distance.
@@ -795,7 +831,7 @@ shader lens_camera(
                                num_surfaces, stop_index,
                                radii, thicknesses, iors, apertures,
                                abbe_v, lambda,
-                               aperture_blades, blade_rot_rad,
+                               aperture_blades, blade_rot_rad, coating,
                                exit_origin, exit_dir, surfaces_passed, failure_type,
                                total_transmission);
 

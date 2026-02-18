@@ -4,6 +4,7 @@ patent = "M.J. Kidger, Fundamental Optical Design, SPIE Press, 2001, p.191 (scal
 focal_length = 85.0
 max_fstop = 2.4
 stop_index = 3
+coating = "none"
 
 [[surface]]
 radius = 83.68
