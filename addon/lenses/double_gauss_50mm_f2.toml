@@ -1,0 +1,83 @@
+[lens]
+name = "Double Gauss 50mm f/2"
+patent = "US Patent 2,673,491"
+focal_length = 50.0
+max_fstop = 2.0
+stop_index = 5
+
+[[surface]]
+radius = 29.475
+thickness = 3.76
+ior = 1.67
+aperture = 25.2
+abbe_v = 57.0
+
+[[surface]]
+radius = 84.83
+thickness = 0.12
+ior = 1.0
+aperture = 25.2
+abbe_v = 0.0
+
+[[surface]]
+radius = 19.275
+thickness = 4.025
+ior = 1.67
+aperture = 23.0
+abbe_v = 57.0
+
+[[surface]]
+radius = 40.77
+thickness = 3.275
+ior = 1.699
+aperture = 23.0
+abbe_v = 30.0
+
+[[surface]]
+radius = 12.75
+thickness = 5.705
+ior = 1.0
+aperture = 18.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 4.5
+ior = 1.0
+aperture = 17.1
+abbe_v = 0.0
+
+[[surface]]
+radius = -14.495
+thickness = 1.18
+ior = 1.603
+aperture = 17.0
+abbe_v = 38.0
+
+[[surface]]
+radius = 40.77
+thickness = 6.065
+ior = 1.658
+aperture = 20.0
+abbe_v = 50.0
+
+[[surface]]
+radius = -20.385
+thickness = 0.19
+ior = 1.0
+aperture = 20.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 437.065
+thickness = 3.22
+ior = 1.717
+aperture = 20.0
+abbe_v = 48.0
+
+[[surface]]
+radius = -39.73
+thickness = 0.0
+ior = 1.0
+aperture = 20.0
+abbe_v = 0.0

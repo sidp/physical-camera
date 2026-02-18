@@ -1,2 +1,5 @@
 *.oso
 *.blend*
+__pycache__/
+Renders/
+*.local.json

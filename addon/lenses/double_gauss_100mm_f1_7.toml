@@ -1,0 +1,83 @@
+[lens]
+name = "Double Gauss 100mm f/1.7"
+patent = "US Patent 2,784,643"
+focal_length = 100.0
+max_fstop = 1.7
+stop_index = 5
+
+[[surface]]
+radius = 75.050
+thickness = 9.000
+ior = 1.717
+aperture = 66.0
+abbe_v = 47.9
+
+[[surface]]
+radius = 270.700
+thickness = 0.100
+ior = 1.0
+aperture = 66.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 39.270
+thickness = 16.510
+ior = 1.667
+aperture = 55.0
+abbe_v = 48.3
+
+[[surface]]
+radius = 0.0
+thickness = 2.000
+ior = 1.673
+aperture = 49.0
+abbe_v = 32.25
+
+[[surface]]
+radius = 25.650
+thickness = 10.990
+ior = 1.0
+aperture = 39.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 13.000
+ior = 1.0
+aperture = 37.2
+abbe_v = 0.0
+
+[[surface]]
+radius = -31.870
+thickness = 7.030
+ior = 1.673
+aperture = 37.0
+abbe_v = 32.25
+
+[[surface]]
+radius = 0.0
+thickness = 8.980
+ior = 1.717
+aperture = 42.0
+abbe_v = 47.9
+
+[[surface]]
+radius = -43.510
+thickness = 0.100
+ior = 1.0
+aperture = 42.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 221.140
+thickness = 7.980
+ior = 1.667
+aperture = 46.0
+abbe_v = 48.3
+
+[[surface]]
+radius = -88.790
+thickness = 0.0
+ior = 1.0
+aperture = 46.0
+abbe_v = 0.0

@@ -1,49 +1,4 @@
-#define MAX_SURFACES 24
-
-void load_lens_data(
-    int lens_type,
-    output float radii[MAX_SURFACES],
-    output float thicknesses[MAX_SURFACES],
-    output float iors[MAX_SURFACES],
-    output float apertures[MAX_SURFACES],
-    output float abbe_v[MAX_SURFACES],
-    output int num_surfaces,
-    output int stop_index)
-{
-    if (lens_type == 0) {
-        // Double Gauss 50mm f/2 (PBRT, US Patent 2,673,491)
-        // Listed front-to-back (scene-side to sensor-side)
-        num_surfaces = 11;
-        stop_index = 5;
-        radii[0]  =  29.475;  thicknesses[0]  = 3.76;  iors[0]  = 1.67;  apertures[0]  = 25.2;  abbe_v[0]  = 57.0;
-        radii[1]  =  84.83;   thicknesses[1]  = 0.12;  iors[1]  = 1.0;   apertures[1]  = 25.2;  abbe_v[1]  = 0.0;
-        radii[2]  =  19.275;  thicknesses[2]  = 4.025; iors[2]  = 1.67;  apertures[2]  = 23.0;  abbe_v[2]  = 57.0;
-        radii[3]  =  40.77;   thicknesses[3]  = 3.275; iors[3]  = 1.699; apertures[3]  = 23.0;  abbe_v[3]  = 30.0;
-        radii[4]  =  12.75;   thicknesses[4]  = 5.705; iors[4]  = 1.0;   apertures[4]  = 18.0;  abbe_v[4]  = 0.0;
-        radii[5]  =   0.0;    thicknesses[5]  = 4.5;   iors[5]  = 1.0;   apertures[5]  = 17.1;  abbe_v[5]  = 0.0;
-        radii[6]  = -14.495;  thicknesses[6]  = 1.18;  iors[6]  = 1.603; apertures[6]  = 17.0;  abbe_v[6]  = 38.0;
-        radii[7]  =  40.77;   thicknesses[7]  = 6.065; iors[7]  = 1.658; apertures[7]  = 20.0;  abbe_v[7]  = 50.0;
-        radii[8]  = -20.385;  thicknesses[8]  = 0.19;  iors[8]  = 1.0;   apertures[8]  = 20.0;  abbe_v[8]  = 0.0;
-        radii[9]  = 437.065;  thicknesses[9]  = 3.22;  iors[9]  = 1.717; apertures[9]  = 20.0;  abbe_v[9]  = 48.0;
-        radii[10] = -39.73;   thicknesses[10] = 0.0;   iors[10] = 1.0;   apertures[10] = 20.0;  abbe_v[10] = 0.0;
-    }
-    else if (lens_type == 1) {
-        // Double Gauss 100mm f/1.7 (US Patent 2,784,643)
-        num_surfaces = 11;
-        stop_index = 5;
-        radii[0]  =  75.050;  thicknesses[0]  =  9.000;  iors[0]  = 1.717;  apertures[0]  = 66.0;  abbe_v[0]  = 47.9;
-        radii[1]  = 270.700;  thicknesses[1]  =  0.100;  iors[1]  = 1.0;    apertures[1]  = 66.0;  abbe_v[1]  =  0.0;
-        radii[2]  =  39.270;  thicknesses[2]  = 16.510;  iors[2]  = 1.667;  apertures[2]  = 55.0;  abbe_v[2]  = 48.3;
-        radii[3]  =   0.0;    thicknesses[3]  =  2.000;  iors[3]  = 1.673;  apertures[3]  = 49.0;  abbe_v[3]  = 32.25;
-        radii[4]  =  25.650;  thicknesses[4]  = 10.990;  iors[4]  = 1.0;    apertures[4]  = 39.0;  abbe_v[4]  =  0.0;
-        radii[5]  =   0.0;    thicknesses[5]  = 13.000;  iors[5]  = 1.0;    apertures[5]  = 37.2;  abbe_v[5]  =  0.0;
-        radii[6]  = -31.870;  thicknesses[6]  =  7.030;  iors[6]  = 1.673;  apertures[6]  = 37.0;  abbe_v[6]  = 32.25;
-        radii[7]  =   0.0;    thicknesses[7]  =  8.980;  iors[7]  = 1.717;  apertures[7]  = 42.0;  abbe_v[7]  = 47.9;
-        radii[8]  = -43.510;  thicknesses[8]  =  0.100;  iors[8]  = 1.0;    apertures[8]  = 42.0;  abbe_v[8]  =  0.0;
-        radii[9]  = 221.140;  thicknesses[9]  =  7.980;  iors[9]  = 1.667;  apertures[9]  = 46.0;  abbe_v[9]  = 48.3;
-        radii[10] = -88.790;  thicknesses[10] =  0.0;    iors[10] = 1.0;    apertures[10] = 46.0;  abbe_v[10] =  0.0;
-    }
-}
+// {{LENS_DATA}}
 
 // Cauchy dispersion: n(λ) = A + B/λ², coefficients derived from n_d and Abbe number.
 float cauchy_ior(float n_d, float v_d, float lambda_nm)
@@ -510,7 +465,7 @@ shader lens_camera(
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open." ]],
     int lens_type = 0
-        [[ string description = "Lens selection. 0 = Double Gauss 50mm f/2, 1 = Double Gauss 100mm f/1.7." ]],
+        [[ string description = "Lens selection index (see add-on UI for available lenses)." ]],
     int aperture_blades = 0
         [[ string description = "Number of aperture blades. 0 = circular." ]],
     float blade_rotation = 0.0
