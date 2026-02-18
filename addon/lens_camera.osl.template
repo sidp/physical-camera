@@ -500,13 +500,14 @@ int trace_lens_system(
                 if (flat_is_stop)
                     flat_semi_ap *= aperture_scale;
 
-                float check_x = p[0];
-                float check_y = p[1];
-                if (abs(d[2]) > 1e-10) {
-                    float t_proj = (flat_z - p[2]) / d[2];
-                    check_x = p[0] + t_proj * d[0];
-                    check_y = p[1] + t_proj * d[1];
+                if (abs(d[2]) <= 1e-10) {
+                    failure_type = 1;
+                    return 0;
                 }
+
+                float t_proj = (flat_z - p[2]) / d[2];
+                float check_x = p[0] + t_proj * d[0];
+                float check_y = p[1] + t_proj * d[1];
 
                 if (flat_is_stop && num_blades >= 3) {
                     if (!point_in_ngon(check_x, check_y, flat_semi_ap, num_blades, blade_rotation)) {
@@ -576,13 +577,14 @@ int trace_lens_system(
                 next_semi_ap *= aperture_scale;
 
             // Project refracted ray back to the flat surface plane
-            float check_x = p[0];
-            float check_y = p[1];
-            if (abs(d[2]) > 1e-10) {
-                float t_proj = (flat_z - p[2]) / d[2];
-                check_x = p[0] + t_proj * d[0];
-                check_y = p[1] + t_proj * d[1];
+            if (abs(d[2]) <= 1e-10) {
+                failure_type = 1;
+                return 0;
             }
+
+            float t_proj = (flat_z - p[2]) / d[2];
+            float check_x = p[0] + t_proj * d[0];
+            float check_y = p[1] + t_proj * d[1];
 
             if (next_is_stop && num_blades >= 3) {
                 if (!point_in_ngon(check_x, check_y, next_semi_ap, num_blades, blade_rotation)) {
