@@ -1,0 +1,55 @@
+[lens]
+name = "Petzval 85mm f/2.4"
+patent = "M.J. Kidger, Fundamental Optical Design, SPIE Press, 2001, p.191 (scaled from 100mm)"
+focal_length = 85.0
+max_fstop = 2.4
+stop_index = 3
+
+[[surface]]
+radius = 83.68
+thickness = 11.05
+ior = 1.5168
+aperture = 48.42
+abbe_v = 64.17
+
+[[surface]]
+radius = -70.80
+thickness = 3.40
+ior = 1.6541
+aperture = 44.66
+abbe_v = 39.7
+
+[[surface]]
+radius = -1009.49
+thickness = 34.0
+ior = 1.0
+aperture = 37.43
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 34.0
+ior = 1.0
+aperture = 28.27
+abbe_v = 0.0
+
+[[surface]]
+radius = 48.85
+thickness = 10.20
+ior = 1.6074
+aperture = 34.92
+abbe_v = 56.65
+
+[[surface]]
+radius = -46.43
+thickness = 2.55
+ior = 1.6727
+aperture = 34.12
+abbe_v = 32.25
+
+[[surface]]
+radius = -522.49
+thickness = 0.0
+ior = 1.0
+aperture = 28.03
+abbe_v = 0.0
