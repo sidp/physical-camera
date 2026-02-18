@@ -1,0 +1,55 @@
+[lens]
+name = "Cooke Triplet 50mm f/4.5"
+patent = "H. Dennis Taylor, 1893 (OSLO educational prescription)"
+focal_length = 50.0
+max_fstop = 4.5
+stop_index = 2
+
+[[surface]]
+radius = 21.48
+thickness = 2.0
+ior = 1.621
+aperture = 14.0
+abbe_v = 60.3
+
+[[surface]]
+radius = -124.1
+thickness = 5.16
+ior = 1.0
+aperture = 14.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 0.0
+thickness = 0.1
+ior = 1.0
+aperture = 11.1
+abbe_v = 0.0
+
+[[surface]]
+radius = -19.1
+thickness = 1.25
+ior = 1.621
+aperture = 12.0
+abbe_v = 36.4
+
+[[surface]]
+radius = 22.0
+thickness = 4.69
+ior = 1.0
+aperture = 12.0
+abbe_v = 0.0
+
+[[surface]]
+radius = 328.9
+thickness = 2.25
+ior = 1.621
+aperture = 13.0
+abbe_v = 60.3
+
+[[surface]]
+radius = -16.7
+thickness = 0.0
+ior = 1.0
+aperture = 13.0
+abbe_v = 0.0
