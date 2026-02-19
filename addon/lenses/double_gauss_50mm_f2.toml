@@ -3,7 +3,6 @@ name = "Double Gauss 50mm f/2"
 patent = "US Patent 2,673,491"
 focal_length = 50.0
 max_fstop = 2.0
-stop_index = 5
 coating = "single"
 
 [[surface]]
@@ -42,6 +41,7 @@ aperture = 18.0
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 4.5
 ior = 1.0

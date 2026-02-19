@@ -3,7 +3,6 @@ name = "Sonnar 50mm f/1.5"
 patent = "French Patent FR837,616 (Bertele/Zeiss, 1937)"
 focal_length = 50.0
 max_fstop = 1.5
-stop_index = 6
 coating = "none"
 
 [[surface]]
@@ -49,6 +48,7 @@ aperture = 19.0
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 1.12
 ior = 1.0

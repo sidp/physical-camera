@@ -18,28 +18,30 @@ There are two main parts:
 
 ### Blender Addon (`addon/`)
 - `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `codegen.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
-- `lenses.py` — Reads TOML lens files from `addon/lenses/` into dicts (no bpy dependency, shared by the build script)
-- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template
+- `lenses.py` — Reads TOML lens files from `addon/lenses/` into dicts (no bpy dependency, shared by the build script). Infers a `surface_types` list per lens (`"spherical"`, `"flat"`, `"stop"`)
+- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template. Emits `surface_types[]`, `extra[]` arrays, and `SURFACE_*` type constants
 - `diagram.py` — Loads pre-rendered lens diagram PNGs from `addon/previews/` as Blender preview icons
-- `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop, stop_index) and `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v)
+- `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop) and `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v). The aperture stop surface must have `type = "stop"`. Other surfaces infer their type from `radius` (0 = flat, nonzero = spherical)
 - `blender_manifest.toml` — Blender extension manifest
 
 ## Adding a New Lens
 
 1. Create a new `.toml` file in `addon/lenses/` following the existing format
 2. Surface data uses the PBRT convention: radii of curvature in mm, positive = center of curvature toward the sensor
-3. The `stop_index` is the 0-based index of the aperture stop surface (radius=0, ior=1.0)
+3. The aperture stop surface must have `type = "stop"` (radius=0, ior=1.0). Exactly one stop per lens is required
 4. Lens files are loaded alphabetically — the filename determines the enum order in the UI
 5. Regenerate lens diagram PNGs: `uv run scripts/build_diagrams.py`
 
 ## Shader Function Pipeline
 
-1. `load_lens_data()` — generated at registration; selects lens prescription by index
+1. `load_lens_data()` — generated at registration; selects lens prescription by index. Outputs `surface_types[]` (int per surface: `SURFACE_SPHERICAL=0`, `SURFACE_FLAT=1`, `SURFACE_STOP=2`) and `extra[]` (4 floats per surface, reserved for future conic/anamorphic parameters)
 2. `compute_sensor_distance()` — ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance
-3. `compute_exit_pupil()` — ABCD matrix for rear subsystem to find exit pupil position/magnification
-4. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures
-5. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element
-6. `refract_at_surface()` — ray-sphere intersection, aperture clip, Snell's law refraction, Fresnel transmittance
+3. `compute_exit_pupil()` — ABCD matrix for rear subsystem to find exit pupil position/magnification. Derives stop index from `surface_types[]`
+4. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures. Derives stop index from `surface_types[]`
+5. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch
+6. `refract_at_surface()` — dispatches on `surface_type`: spherical (ray-sphere intersection + Snell's law), flat (plane intersection + Snell's law), or stop (shaped aperture clip, no refraction)
+7. `check_aperture_at_plane()` — projects a ray to a z-plane and checks circular or n-gon aperture clip
+8. `refract_at_flat_plane()` — Snell's law at a flat surface with Fresnel transmittance
 
 Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel loss against on-axis transmission. When chromatic aberration is enabled, wavelength is sampled uniformly over 400–700nm with golden-ratio decorrelation for the aperture radius sample.
 
@@ -55,7 +57,9 @@ Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel lo
 
 - All lens dimensions are in millimeters within the shader; Blender's camera space uses meters
 - `iors[i]` represents the medium *after* surface i (toward sensor), not before it
-- The aperture stop surface has `radius=0` and `ior=1.0`; it clips rays but does not refract
+- The aperture stop surface has `radius=0` and `ior=1.0`; it clips rays but does not refract. Identified by `surface_types[i] == SURFACE_STOP`, not by index
+- `surface_types[]` determines how each surface is processed — all type branching uses these constants rather than checking `radius == 0` or comparing to a stop index
+- `extra[]` has 4 float slots per surface (`extra[i*N_EXTRA + 0..3]`), currently all zero, reserved for conic constants and anamorphic parameters
 - Sensor distance is computed via ABCD paraxial optics from Blender's `cam:focal_distance`
 - Fresnel transmission is tracked per-surface and normalized against on-axis transmission for exposure compensation
 

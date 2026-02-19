@@ -3,7 +3,6 @@ name = "Petzval 85mm f/2.4"
 patent = "M.J. Kidger, Fundamental Optical Design, SPIE Press, 2001, p.191 (scaled from 100mm)"
 focal_length = 85.0
 max_fstop = 2.4
-stop_index = 3
 coating = "none"
 
 [[surface]]
@@ -28,6 +27,7 @@ aperture = 37.43
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 34.0
 ior = 1.0

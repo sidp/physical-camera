@@ -4,8 +4,13 @@ from pathlib import Path
 
 from .lenses import MAX_SURFACES, load_lenses
 
+N_EXTRA = 4
 
-def _format_surface_assignments(surfaces: list[dict]) -> str:
+_COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
+_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2}
+
+
+def _format_surface_assignments(surfaces: list[dict], surface_types: list[str]) -> str:
     """Generate OSL assignment lines for one lens's surface data."""
     lines = []
     for i, s in enumerate(surfaces):
@@ -17,16 +22,39 @@ def _format_surface_assignments(surfaces: list[dict]) -> str:
             f"apertures{idx:<4} = {s['aperture']};  "
             f"abbe_v{idx:<4} = {s['abbe_v']};"
         )
+    lines.append("")
+    for i, st in enumerate(surface_types):
+        lines.append(
+            f"        surface_types[{i}] = {_TYPE_VALUES[st]};"
+        )
+    lines.append("")
+    for i in range(len(surfaces)):
+        base = i * N_EXTRA
+        lines.append(
+            f"        extra[{base}] = 0.0;  "
+            f"extra[{base + 1}] = 0.0;  "
+            f"extra[{base + 2}] = 0.0;  "
+            f"extra[{base + 3}] = 0.0;"
+        )
     return "\n".join(lines)
-
-
-_COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
 
 
 def _generate_load_lens_data(lenses: list[dict]) -> str:
     """Generate the #define and load_lens_data() function."""
+    max_extra = MAX_SURFACES * N_EXTRA
     lines = [
         f"#define MAX_SURFACES {MAX_SURFACES}",
+        f"#define N_EXTRA {N_EXTRA}",
+        f"#define MAX_EXTRA {max_extra}",
+        "",
+        "#define SURFACE_SPHERICAL 0",
+        "#define SURFACE_FLAT      1",
+        "#define SURFACE_STOP      2",
+        "",
+        "// extra[i*N_EXTRA + 0] = conic constant (future: aspheric surfaces)",
+        "// extra[i*N_EXTRA + 1] = reserved (future: second radius for anamorphic)",
+        "// extra[i*N_EXTRA + 2] = reserved",
+        "// extra[i*N_EXTRA + 3] = reserved",
         "",
         "void load_lens_data(",
         "    int lens_type,",
@@ -35,8 +63,9 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output float iors[MAX_SURFACES],",
         "    output float apertures[MAX_SURFACES],",
         "    output float abbe_v[MAX_SURFACES],",
+        "    output int surface_types[MAX_SURFACES],",
+        "    output float extra[MAX_EXTRA],",
         "    output int num_surfaces,",
-        "    output int stop_index,",
         "    output float coating)",
         "{",
     ]
@@ -47,9 +76,10 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         lines.append(f"    {keyword} (lens_type == {i}) {{")
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
-        lines.append(f"        stop_index = {lens['stop_index']};")
         lines.append(f"        coating = {coating_val};")
-        lines.append(_format_surface_assignments(lens["surfaces"]))
+        lines.append(_format_surface_assignments(
+            lens["surfaces"], lens["surface_types"]
+        ))
         lines.append("    }")
 
     default = lenses[0]
@@ -57,9 +87,10 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
     lines.append("    else {")
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
-    lines.append(f"        stop_index = {default['stop_index']};")
     lines.append(f"        coating = {default_coating};")
-    lines.append(_format_surface_assignments(default["surfaces"]))
+    lines.append(_format_surface_assignments(
+        default["surfaces"], default["surface_types"]
+    ))
     lines.append("    }")
 
     lines.append("}")

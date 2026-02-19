@@ -3,7 +3,6 @@ name = "Double Gauss 100mm f/1.7"
 patent = "US Patent 2,784,643"
 focal_length = 100.0
 max_fstop = 1.7
-stop_index = 5
 coating = "single"
 
 [[surface]]
@@ -42,6 +41,7 @@ aperture = 39.0
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 13.000
 ior = 1.0

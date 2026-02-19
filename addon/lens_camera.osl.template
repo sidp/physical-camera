@@ -67,6 +67,74 @@ float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float 
     return 1.0 - R;
 }
 
+int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
+{
+    float r = sqrt(x * x + y * y);
+    if (r < 1e-10)
+        return 1;
+    float sector_angle = 2.0 * M_PI / float(num_blades);
+    float angle = atan2(y, x) - rotation_rad;
+    angle = angle - floor(angle / (2.0 * M_PI)) * 2.0 * M_PI;
+    float theta = mod(angle, sector_angle) - sector_angle * 0.5;
+    float max_r = semi_ap * cos(M_PI / float(num_blades)) / cos(theta);
+    return (r <= max_r) ? 1 : 0;
+}
+
+// Project ray to a z-plane and check circular or n-gon aperture.
+// Returns 1 if the ray passes, 0 if projection fails, -1 if clipped.
+// Sets out_p to the projected point on success.
+int check_aperture_at_plane(
+    point p, vector d,
+    float plane_z, float semi_aperture,
+    int surface_type, int num_blades, float blade_rotation,
+    output point out_p)
+{
+    if (abs(d[2]) <= 1e-10)
+        return 0;
+
+    float t = (plane_z - p[2]) / d[2];
+    float hx = p[0] + t * d[0];
+    float hy = p[1] + t * d[1];
+
+    if (surface_type == SURFACE_STOP && num_blades >= 3) {
+        if (!point_in_ngon(hx, hy, semi_aperture, num_blades, blade_rotation))
+            return -1;
+    } else {
+        float r = sqrt(hx * hx + hy * hy);
+        if (r > semi_aperture)
+            return -1;
+    }
+
+    out_p = point(hx, hy, plane_z);
+    return 1;
+}
+
+// Snell's law at a flat surface with Fresnel transmittance.
+// Returns 1 on success, 0 on TIR.
+int refract_at_flat_plane(
+    vector d_in, float n1, float n2, float coating,
+    output vector d_out, output float transmission)
+{
+    if (n1 == n2) {
+        d_out = d_in;
+        transmission = 1.0;
+        return 1;
+    }
+
+    vector N = vector(0, 0, -1);
+    vector I = normalize(d_in);
+    if (dot(I, N) > 0.0)
+        N = -N;
+    float cos_i = abs(dot(I, N));
+    vector refracted = refract(I, N, n1 / n2);
+    if (dot(refracted, refracted) < 1e-10)
+        return 0;
+    float cos_t = abs(dot(refracted, N));
+    transmission = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
+    d_out = refracted;
+    return 1;
+}
+
 float onaxis_fresnel_transmission(
     int num_surfaces,
     float radii[MAX_SURFACES],
@@ -91,6 +159,7 @@ float compute_sensor_distance(
     float radii[MAX_SURFACES],
     float thicknesses[MAX_SURFACES],
     float iors[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
     float total_length,
     float focus_mm)
 {
@@ -102,8 +171,8 @@ float compute_sensor_distance(
         float n_before = (i == 0) ? 1.0 : iors[i - 1];
         float n_after = iors[i];
 
-        // Refraction matrix (skip flat surfaces and matching IOR)
-        if (radii[i] != 0.0 && n_before != n_after) {
+        // Refraction matrix (only spherical surfaces have optical power)
+        if (surface_types[i] == SURFACE_SPHERICAL && n_before != n_after) {
             float phi = (n_after - n_before) / radii[i];
             C -= phi * A;
             D -= phi * B;
@@ -139,13 +208,18 @@ float compute_sensor_distance(
 
 void compute_exit_pupil(
     int num_surfaces,
-    int stop_index,
     float radii[MAX_SURFACES],
     float thicknesses[MAX_SURFACES],
     float iors[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
     output float ep_z,
     output float ep_magnification)
 {
+    int stop_index = 0;
+    for (int i = 0; i < num_surfaces; i++) {
+        if (surface_types[i] == SURFACE_STOP) { stop_index = i; break; }
+    }
+
     // Build ABCD matrix for the rear subsystem (stop -> rear vertex).
     // This gives the exit pupil position and magnification relative to the
     // physical aperture stop, so we can aim rays at the apparent opening.
@@ -160,8 +234,8 @@ void compute_exit_pupil(
         float n_before = iors[i - 1];
         float n_after = iors[i];
 
-        // Refraction
-        if (radii[i] != 0.0 && n_before != n_after) {
+        // Refraction (only spherical surfaces have optical power)
+        if (surface_types[i] == SURFACE_SPHERICAL && n_before != n_after) {
             float phi = (n_after - n_before) / radii[i];
             C -= phi * A;
             D -= phi * B;
@@ -188,11 +262,17 @@ void compute_exit_pupil(
 void compute_field_exit_pupil(
     float sensor_x, float sensor_y, float sensor_z,
     float ep_z, float stop_z, float aim_semi_ap,
-    int num_surfaces, int stop_index,
+    int num_surfaces,
+    int surface_types[MAX_SURFACES],
     float thicknesses[MAX_SURFACES],
     float apertures[MAX_SURFACES],
     output float ep_cx, output float ep_cy, output float ep_r)
 {
+    int stop_index = 0;
+    for (int i = 0; i < num_surfaces; i++) {
+        if (surface_types[i] == SURFACE_STOP) { stop_index = i; break; }
+    }
+
     // Chief ray crossing: where a ray from the sensor through the stop center
     // hits the exit pupil plane
     float chief_t = (ep_z - sensor_z) / (stop_z - sensor_z);
@@ -232,19 +312,6 @@ void compute_field_exit_pupil(
         ep_r = aim_semi_ap;
     if (ep_r < 0.0)
         ep_r = 0.0;
-}
-
-int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
-{
-    float r = sqrt(x * x + y * y);
-    if (r < 1e-10)
-        return 1;
-    float sector_angle = 2.0 * M_PI / float(num_blades);
-    float angle = atan2(y, x) - rotation_rad;
-    angle = angle - floor(angle / (2.0 * M_PI)) * 2.0 * M_PI;
-    float theta = mod(angle, sector_angle) - sector_angle * 0.5;
-    float max_r = semi_ap * cos(M_PI / float(num_blades)) / cos(theta);
-    return (r <= max_r) ? 1 : 0;
 }
 
 int intersect_sphere(
@@ -309,13 +376,13 @@ int refract_at_surface(
     float n2,
     int num_blades,
     float blade_rotation,
-    int is_stop,
+    int surface_type,
     float coating,
     output point new_origin,
     output vector new_dir,
     output float transmission)
 {
-    if (radius == 0.0) {
+    if (surface_type != SURFACE_SPHERICAL) {
         float dz = ray_dir[2];
         if (abs(dz) < 1e-10)
             return 0;
@@ -324,7 +391,7 @@ int refract_at_surface(
             return 0;
         new_origin = ray_origin + t * ray_dir;
 
-        if (is_stop) {
+        if (surface_type == SURFACE_STOP) {
             // Aperture stop: shaped clipping, no refraction
             if (num_blades >= 3) {
                 if (!point_in_ngon(new_origin[0], new_origin[1], semi_aperture, num_blades, blade_rotation))
@@ -405,12 +472,12 @@ int trace_lens_system(
     vector ray_dir,
     float aperture_scale,
     int num_surfaces,
-    int stop_index,
     float radii[MAX_SURFACES],
     float thicknesses[MAX_SURFACES],
     float iors[MAX_SURFACES],
     float apertures[MAX_SURFACES],
     float abbe_v[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
     float lambda_nm,
     int num_blades,
     float blade_rotation,
@@ -440,34 +507,38 @@ int trace_lens_system(
     point  p = ray_origin;
     vector d = ray_dir;
 
-    // State saved before flat surfaces for sphere-overlap retry
-    point pre_flat_p = point(0, 0, 0);
-    vector pre_flat_d = vector(0, 0, 0);
-    float pre_flat_transmission = 0.0;
-    int pre_flat_surfaces = 0;
-    int pre_flat_idx = -1;
+    // State saved before flat surfaces for sphere-overlap retry.
+    // When a curved surface's sphere extends past an adjacent flat surface,
+    // we may need to roll back and reprocess. Two cases:
+    //   Overshoot: curved hit overshoots past the next flat — handle flat early
+    //   Mirror: flat processed first but curved sphere is unreachable — retry
+    point saved_p = point(0, 0, 0);
+    vector saved_d = vector(0, 0, 0);
+    float saved_transmission = 0.0;
+    int saved_surfaces = 0;
+    int saved_idx = -1;
 
     // Trace rear-to-front: last surface down to surface 0
-    int skip_surface = 0;
+    int skip_count = 0;
     for (int idx = num_surfaces - 1; idx >= 0; idx--) {
-        if (skip_surface) {
-            skip_surface = 0;
-            pre_flat_idx = -1;
+        if (skip_count > 0) {
+            skip_count -= 1;
+            saved_idx = -1;
             continue;
         }
 
         // Save ray state before flat surfaces for sphere-overlap retry
-        if (radii[idx] == 0.0) {
-            pre_flat_p = p;
-            pre_flat_d = d;
-            pre_flat_transmission = total_transmission;
-            pre_flat_surfaces = surfaces_passed;
-            pre_flat_idx = idx;
+        if (surface_types[idx] != SURFACE_SPHERICAL) {
+            saved_p = p;
+            saved_d = d;
+            saved_transmission = total_transmission;
+            saved_surfaces = surfaces_passed;
+            saved_idx = idx;
         }
 
         float semi_ap = apertures[idx] * 0.5;
 
-        if (idx == stop_index)
+        if (surface_types[idx] == SURFACE_STOP)
             semi_ap *= aperture_scale;
 
         // iors[i] = IOR of the medium between surface i and surface i+1
@@ -477,101 +548,72 @@ int trace_lens_system(
         float n1 = cauchy_ior(iors[idx], abbe_v[idx], lambda_nm);
         float n2 = (idx > 0) ? cauchy_ior(iors[idx - 1], abbe_v[idx - 1], lambda_nm) : 1.0;
 
-        // No refraction at aperture stop
-        if (idx == stop_index) {
+        if (surface_types[idx] == SURFACE_STOP) {
             n1 = 1.0;
             n2 = 1.0;
         }
-
-        int is_stop = (idx == stop_index) ? 1 : 0;
 
         point  new_p = point(0, 0, 0);
         vector new_d = vector(0, 0, 0);
         float surface_transmission = 1.0;
 
-        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
-        if (result != 1) {
-            // Mirror case of the overshoot below: a flat surface was
-            // processed first but the next curved surface's sphere
-            // extends past it, making the sphere unreachable. Retry
-            // from the pre-flat position, then project to the flat
-            // surface for the aperture check.
-            if (radii[idx] != 0.0 && pre_flat_idx == idx + 1) {
-                p = pre_flat_p;
-                d = pre_flat_d;
-                total_transmission = pre_flat_transmission;
-                surfaces_passed = pre_flat_surfaces;
-                pre_flat_idx = -1;
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, new_p, new_d, surface_transmission);
 
-                result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
-                if (result != 1) {
-                    if (result == 0) failure_type = 1;
-                    else if (result == -1) failure_type = 2;
-                    else if (result == -2) failure_type = 3;
-                    return 0;
-                }
+        // Mirror case: a flat surface was processed but the adjacent curved
+        // surface's sphere extends past it, making intersection unreachable.
+        // Roll back to before the flat surface and retry the curved one first.
+        if (result != 1 && surface_types[idx] == SURFACE_SPHERICAL && saved_idx == idx + 1) {
+            p = saved_p;
+            d = saved_d;
+            total_transmission = saved_transmission;
+            surfaces_passed = saved_surfaces;
+            saved_idx = -1;
 
-                surfaces_passed += 1;
-                total_transmission *= surface_transmission;
-                p = new_p;
-                d = new_d;
-
-                int flat_idx = idx + 1;
-                float flat_z = vertex_z[flat_idx];
-                float flat_semi_ap = apertures[flat_idx] * 0.5;
-                int flat_is_stop = (flat_idx == stop_index) ? 1 : 0;
-
-                if (flat_is_stop)
-                    flat_semi_ap *= aperture_scale;
-
-                if (abs(d[2]) <= 1e-10) {
-                    failure_type = 1;
-                    return 0;
-                }
-
-                float t_proj = (flat_z - p[2]) / d[2];
-                float check_x = p[0] + t_proj * d[0];
-                float check_y = p[1] + t_proj * d[1];
-
-                if (flat_is_stop && num_blades >= 3) {
-                    if (!point_in_ngon(check_x, check_y, flat_semi_ap, num_blades, blade_rotation)) {
-                        failure_type = 2;
-                        return 0;
-                    }
-                } else {
-                    float r_check = sqrt(check_x * check_x + check_y * check_y);
-                    if (r_check > flat_semi_ap) {
-                        failure_type = 2;
-                        return 0;
-                    }
-                }
-
-                p = point(check_x, check_y, flat_z);
-
-                if (!flat_is_stop) {
-                    float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
-                    float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
-                    if (fn1 != fn2) {
-                        vector fN = vector(0, 0, -1);
-                        vector fI = normalize(d);
-                        if (dot(fI, fN) > 0.0)
-                            fN = -fN;
-                        float fcos_i = abs(dot(fI, fN));
-                        vector refr = refract(fI, fN, fn1 / fn2);
-                        if (dot(refr, refr) < 1e-10) {
-                            failure_type = 3;
-                            return 0;
-                        }
-                        float fcos_t = abs(dot(refr, fN));
-                        total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
-                        d = refr;
-                    }
-                }
-
-                surfaces_passed += 1;
-                continue;
+            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, new_p, new_d, surface_transmission);
+            if (result != 1) {
+                if (result == 0) failure_type = 1;
+                else if (result == -1) failure_type = 2;
+                else if (result == -2) failure_type = 3;
+                return 0;
             }
 
+            surfaces_passed += 1;
+            total_transmission *= surface_transmission;
+            p = new_p;
+            d = new_d;
+
+            // Now handle the flat surface we rolled back
+            int flat_idx = idx + 1;
+            float flat_semi_ap = apertures[flat_idx] * 0.5;
+            if (surface_types[flat_idx] == SURFACE_STOP)
+                flat_semi_ap *= aperture_scale;
+
+            point flat_p;
+            int flat_check = check_aperture_at_plane(p, d, vertex_z[flat_idx], flat_semi_ap,
+                                                     surface_types[flat_idx], num_blades, blade_rotation, flat_p);
+            if (flat_check != 1) {
+                failure_type = (flat_check == 0) ? 1 : 2;
+                return 0;
+            }
+            p = flat_p;
+
+            if (surface_types[flat_idx] != SURFACE_STOP) {
+                float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
+                float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
+                vector flat_d; float flat_trans;
+                if (!refract_at_flat_plane(d, fn1, fn2, coating, flat_d, flat_trans)) {
+                    failure_type = 3;
+                    return 0;
+                }
+                total_transmission *= flat_trans;
+                d = flat_d;
+            }
+
+            surfaces_passed += 1;
+            continue;
+        }
+
+        if (result != 1) {
             if (result == 0) failure_type = 1;
             else if (result == -1) failure_type = 2;
             else if (result == -2) failure_type = 3;
@@ -583,70 +625,40 @@ int trace_lens_system(
         p = new_p;
         d = new_d;
 
-        if (radii[idx] != 0.0)
-            pre_flat_idx = -1;
+        if (surface_types[idx] == SURFACE_SPHERICAL)
+            saved_idx = -1;
 
-        // A strongly curved surface close to a flat surface can have its
-        // sphere extend past the flat surface's vertex. When the hit point
-        // overshoots, project the refracted ray back to the flat surface's
-        // plane for the aperture check — this gives the correct air-side
-        // position where light physically crosses the flat surface.
-        if (idx > 0 && radii[idx - 1] == 0.0 && p[2] < vertex_z[idx - 1]) {
+        // Overshoot: a curved surface hit overshoots past the next flat
+        // surface's vertex. Handle the flat surface now and skip it later.
+        if (idx > 0 && surface_types[idx - 1] != SURFACE_SPHERICAL && p[2] < vertex_z[idx - 1]) {
             int next_idx = idx - 1;
-            float flat_z = vertex_z[next_idx];
             float next_semi_ap = apertures[next_idx] * 0.5;
-            int next_is_stop = (next_idx == stop_index) ? 1 : 0;
-
-            if (next_is_stop)
+            if (surface_types[next_idx] == SURFACE_STOP)
                 next_semi_ap *= aperture_scale;
 
-            // Project refracted ray back to the flat surface plane
-            if (abs(d[2]) <= 1e-10) {
-                failure_type = 1;
+            point next_p;
+            int next_check = check_aperture_at_plane(p, d, vertex_z[next_idx], next_semi_ap,
+                                                     surface_types[next_idx], num_blades, blade_rotation, next_p);
+            if (next_check != 1) {
+                failure_type = (next_check == 0) ? 1 : 2;
                 return 0;
             }
+            p = next_p;
 
-            float t_proj = (flat_z - p[2]) / d[2];
-            float check_x = p[0] + t_proj * d[0];
-            float check_y = p[1] + t_proj * d[1];
-
-            if (next_is_stop && num_blades >= 3) {
-                if (!point_in_ngon(check_x, check_y, next_semi_ap, num_blades, blade_rotation)) {
-                    failure_type = 2;
-                    return 0;
-                }
-            } else {
-                float r_check = sqrt(check_x * check_x + check_y * check_y);
-                if (r_check > next_semi_ap) {
-                    failure_type = 2;
-                    return 0;
-                }
-            }
-
-            p = point(check_x, check_y, flat_z);
-
-            if (!next_is_stop) {
+            if (surface_types[next_idx] != SURFACE_STOP) {
                 float fn1 = cauchy_ior(iors[next_idx], abbe_v[next_idx], lambda_nm);
                 float fn2 = (next_idx > 0) ? cauchy_ior(iors[next_idx - 1], abbe_v[next_idx - 1], lambda_nm) : 1.0;
-                if (fn1 != fn2) {
-                    vector fN = vector(0, 0, -1);
-                    vector fI = normalize(d);
-                    if (dot(fI, fN) > 0.0)
-                        fN = -fN;
-                    float fcos_i = abs(dot(fI, fN));
-                    vector refr = refract(fI, fN, fn1 / fn2);
-                    if (dot(refr, refr) < 1e-10) {
-                        failure_type = 3;
-                        return 0;
-                    }
-                    float fcos_t = abs(dot(refr, fN));
-                    total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
-                    d = refr;
+                vector next_d; float next_trans;
+                if (!refract_at_flat_plane(d, fn1, fn2, coating, next_d, next_trans)) {
+                    failure_type = 3;
+                    return 0;
                 }
+                total_transmission *= next_trans;
+                d = next_d;
             }
 
             surfaces_passed += 1;
-            skip_surface = 1;
+            skip_count = 1;
         }
     }
 
@@ -706,11 +718,18 @@ shader lens_camera(
     float iors[MAX_SURFACES];
     float apertures[MAX_SURFACES];
     float abbe_v[MAX_SURFACES];
+    int surface_types[MAX_SURFACES];
+    float extra[MAX_EXTRA];
     int num_surfaces = 0;
-    int stop_index = 0;
     float coating = 0.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
-                   num_surfaces, stop_index, coating);
+                   surface_types, extra,
+                   num_surfaces, coating);
+
+    int stop_index = 0;
+    for (int i = 0; i < num_surfaces; i++) {
+        if (surface_types[i] == SURFACE_STOP) { stop_index = i; break; }
+    }
 
     float total_length = 0.0;
     for (int i = 0; i < num_surfaces - 1; i++)
@@ -718,7 +737,7 @@ shader lens_camera(
 
     float focus_mm = focal_distance * 1000.0;
     float sensor_distance = compute_sensor_distance(
-        num_surfaces, radii, thicknesses, iors, total_length, focus_mm);
+        num_surfaces, radii, thicknesses, iors, surface_types, total_length, focus_mm);
 
     // camera_shader_random_sample() provides two independent uniform values in x/y.
     // x = aperture angle, y = wavelength (+ golden-ratio rotation for aperture radius).
@@ -759,7 +778,7 @@ shader lens_camera(
 
     float ep_z = 0.0;
     float ep_magnification = 1.0;
-    compute_exit_pupil(num_surfaces, stop_index, radii, thicknesses, dispersed_iors,
+    compute_exit_pupil(num_surfaces, radii, thicknesses, dispersed_iors, surface_types,
                        ep_z, ep_magnification);
     float aim_z = (ep_magnification > 0.0) ? ep_z : stop_z;
     float aim_semi_ap = (ep_magnification > 0.0) ? stop_semi_ap * ep_magnification : stop_semi_ap;
@@ -767,7 +786,7 @@ shader lens_camera(
     float ep_cx = 0.0, ep_cy = 0.0, field_semi_ap = aim_semi_ap;
     compute_field_exit_pupil(sensor_x, sensor_y, sensor_z,
                              aim_z, stop_z, aim_semi_ap,
-                             num_surfaces, stop_index,
+                             num_surfaces, surface_types,
                              thicknesses, apertures,
                              ep_cx, ep_cy, field_semi_ap);
 
@@ -817,9 +836,9 @@ shader lens_camera(
     float total_transmission = 0.0;
 
     int ok = trace_lens_system(sensor_point, initial_dir, aperture_scale,
-                               num_surfaces, stop_index,
+                               num_surfaces,
                                radii, thicknesses, iors, apertures,
-                               abbe_v, lambda,
+                               abbe_v, surface_types, lambda,
                                aperture_blades, blade_rot_rad, coating,
                                exit_origin, exit_dir, surfaces_passed, failure_type,
                                total_transmission);

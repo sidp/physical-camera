@@ -3,7 +3,6 @@ name = "Tessar 50mm f/2.8"
 patent = "US Patent 4,213,674 (Olympus, 1980, Embodiment 1)"
 focal_length = 50.0
 max_fstop = 2.8
-stop_index = 4
 coating = "multi"
 
 [[surface]]
@@ -35,6 +34,7 @@ aperture = 16.0
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 1.0
 ior = 1.0
