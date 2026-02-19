@@ -7,10 +7,8 @@ MAX_SURFACES = 24
 VALID_SURFACE_TYPES = ("spherical", "flat", "stop")
 
 
-def _infer_surface_types(
-    surfaces: list[dict], stop_index: int, filename: str
-) -> list[str]:
-    """Infer or validate the type field for each surface."""
+def _resolve_surface_types(surfaces: list[dict], filename: str) -> list[str]:
+    """Resolve the type for each surface from explicit or inferred values."""
     types = []
     for i, s in enumerate(surfaces):
         explicit = s.get("type")
@@ -20,14 +18,7 @@ def _infer_surface_types(
                     f"{filename}: surface {i} type {explicit!r} must be one "
                     f"of {VALID_SURFACE_TYPES}"
                 )
-            if explicit == "stop" and i != stop_index:
-                raise ValueError(
-                    f"{filename}: surface {i} has type='stop' but "
-                    f"stop_index is {stop_index}"
-                )
             types.append(explicit)
-        elif i == stop_index and s["radius"] == 0:
-            types.append("stop")
         elif s["radius"] == 0:
             types.append("flat")
         else:
@@ -48,12 +39,6 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{toml_path.name}: {len(surfaces)} surfaces exceeds "
                 f"MAX_SURFACES ({MAX_SURFACES})"
             )
-        stop_index = lens["stop_index"]
-        if not (0 <= stop_index < len(surfaces)):
-            raise ValueError(
-                f"{toml_path.name}: stop_index {stop_index} is out of range "
-                f"for {len(surfaces)} surfaces"
-            )
         coating = lens.get("coating", "none")
         valid_coatings = ("none", "single", "multi")
         if coating not in valid_coatings:
@@ -61,9 +46,14 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{toml_path.name}: coating {coating!r} must be one of "
                 f"{valid_coatings}"
             )
-        surface_types = _infer_surface_types(
-            surfaces, stop_index, toml_path.name
-        )
+        surface_types = _resolve_surface_types(surfaces, toml_path.name)
+        stop_count = surface_types.count("stop")
+        if stop_count != 1:
+            raise ValueError(
+                f"{toml_path.name}: expected exactly 1 stop surface, "
+                f"found {stop_count}"
+            )
+        stop_index = surface_types.index("stop")
         lenses.append({
             "name": lens["name"],
             "filename_stem": toml_path.stem,

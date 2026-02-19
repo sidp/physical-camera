@@ -3,7 +3,6 @@ name = "Zuiko 18mm f/3.5"
 patent = "US Patent 4,029,397 (Olympus, 1977)"
 focal_length = 18.0
 max_fstop = 3.5
-stop_index = 13
 coating = "single"
 
 # Front group (divergent)
@@ -104,6 +103,7 @@ abbe_v = 0.0
 # Aperture stop
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 1.42
 ior = 1.0

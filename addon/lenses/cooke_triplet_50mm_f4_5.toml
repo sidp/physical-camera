@@ -3,7 +3,6 @@ name = "Cooke Triplet 50mm f/4.5"
 patent = "H. Dennis Taylor, 1893 (OSLO educational prescription)"
 focal_length = 50.0
 max_fstop = 4.5
-stop_index = 2
 coating = "none"
 
 [[surface]]
@@ -21,6 +20,7 @@ aperture = 14.0
 abbe_v = 0.0
 
 [[surface]]
+type = "stop"
 radius = 0.0
 thickness = 0.1
 ior = 1.0
