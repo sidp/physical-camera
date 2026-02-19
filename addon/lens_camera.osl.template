@@ -495,29 +495,33 @@ int trace_lens_system(
     point  p = ray_origin;
     vector d = ray_dir;
 
-    // State saved before flat surfaces for sphere-overlap retry
-    point pre_flat_p = point(0, 0, 0);
-    vector pre_flat_d = vector(0, 0, 0);
-    float pre_flat_transmission = 0.0;
-    int pre_flat_surfaces = 0;
-    int pre_flat_idx = -1;
+    // State saved before flat surfaces for sphere-overlap retry.
+    // When a curved surface's sphere extends past an adjacent flat surface,
+    // we may need to roll back and reprocess. Two cases:
+    //   Overshoot: curved hit overshoots past the next flat — handle flat early
+    //   Mirror: flat processed first but curved sphere is unreachable — retry
+    point saved_p = point(0, 0, 0);
+    vector saved_d = vector(0, 0, 0);
+    float saved_transmission = 0.0;
+    int saved_surfaces = 0;
+    int saved_idx = -1;
 
     // Trace rear-to-front: last surface down to surface 0
-    int skip_surface = 0;
+    int skip_count = 0;
     for (int idx = num_surfaces - 1; idx >= 0; idx--) {
-        if (skip_surface) {
-            skip_surface = 0;
-            pre_flat_idx = -1;
+        if (skip_count > 0) {
+            skip_count -= 1;
+            saved_idx = -1;
             continue;
         }
 
         // Save ray state before flat surfaces for sphere-overlap retry
         if (radii[idx] == 0.0) {
-            pre_flat_p = p;
-            pre_flat_d = d;
-            pre_flat_transmission = total_transmission;
-            pre_flat_surfaces = surfaces_passed;
-            pre_flat_idx = idx;
+            saved_p = p;
+            saved_d = d;
+            saved_transmission = total_transmission;
+            saved_surfaces = surfaces_passed;
+            saved_idx = idx;
         }
 
         float semi_ap = apertures[idx] * 0.5;
@@ -532,7 +536,6 @@ int trace_lens_system(
         float n1 = cauchy_ior(iors[idx], abbe_v[idx], lambda_nm);
         float n2 = (idx > 0) ? cauchy_ior(iors[idx - 1], abbe_v[idx - 1], lambda_nm) : 1.0;
 
-        // No refraction at aperture stop
         if (idx == stop_index) {
             n1 = 1.0;
             n2 = 1.0;
@@ -545,63 +548,63 @@ int trace_lens_system(
         float surface_transmission = 1.0;
 
         int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
-        if (result != 1) {
-            // Mirror case of the overshoot below: a flat surface was
-            // processed first but the next curved surface's sphere
-            // extends past it, making the sphere unreachable. Retry
-            // from the pre-flat position, then project to the flat
-            // surface for the aperture check.
-            if (radii[idx] != 0.0 && pre_flat_idx == idx + 1) {
-                p = pre_flat_p;
-                d = pre_flat_d;
-                total_transmission = pre_flat_transmission;
-                surfaces_passed = pre_flat_surfaces;
-                pre_flat_idx = -1;
 
-                result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
-                if (result != 1) {
-                    if (result == 0) failure_type = 1;
-                    else if (result == -1) failure_type = 2;
-                    else if (result == -2) failure_type = 3;
-                    return 0;
-                }
+        // Mirror case: a flat surface was processed but the adjacent curved
+        // surface's sphere extends past it, making intersection unreachable.
+        // Roll back to before the flat surface and retry the curved one first.
+        if (result != 1 && radii[idx] != 0.0 && saved_idx == idx + 1) {
+            p = saved_p;
+            d = saved_d;
+            total_transmission = saved_transmission;
+            surfaces_passed = saved_surfaces;
+            saved_idx = -1;
 
-                surfaces_passed += 1;
-                total_transmission *= surface_transmission;
-                p = new_p;
-                d = new_d;
-
-                int flat_idx = idx + 1;
-                float flat_semi_ap = apertures[flat_idx] * 0.5;
-                int flat_is_stop = (flat_idx == stop_index) ? 1 : 0;
-                if (flat_is_stop)
-                    flat_semi_ap *= aperture_scale;
-
-                point flat_p;
-                int flat_check = check_aperture_at_plane(p, d, vertex_z[flat_idx], flat_semi_ap,
-                                                         flat_is_stop, num_blades, blade_rotation, flat_p);
-                if (flat_check != 1) {
-                    failure_type = (flat_check == 0) ? 1 : 2;
-                    return 0;
-                }
-                p = flat_p;
-
-                if (!flat_is_stop) {
-                    float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
-                    float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
-                    vector flat_d; float flat_trans;
-                    if (!refract_at_flat_plane(d, fn1, fn2, coating, flat_d, flat_trans)) {
-                        failure_type = 3;
-                        return 0;
-                    }
-                    total_transmission *= flat_trans;
-                    d = flat_d;
-                }
-
-                surfaces_passed += 1;
-                continue;
+            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, is_stop, coating, new_p, new_d, surface_transmission);
+            if (result != 1) {
+                if (result == 0) failure_type = 1;
+                else if (result == -1) failure_type = 2;
+                else if (result == -2) failure_type = 3;
+                return 0;
             }
 
+            surfaces_passed += 1;
+            total_transmission *= surface_transmission;
+            p = new_p;
+            d = new_d;
+
+            // Now handle the flat surface we rolled back
+            int flat_idx = idx + 1;
+            float flat_semi_ap = apertures[flat_idx] * 0.5;
+            int flat_is_stop = (flat_idx == stop_index) ? 1 : 0;
+            if (flat_is_stop)
+                flat_semi_ap *= aperture_scale;
+
+            point flat_p;
+            int flat_check = check_aperture_at_plane(p, d, vertex_z[flat_idx], flat_semi_ap,
+                                                     flat_is_stop, num_blades, blade_rotation, flat_p);
+            if (flat_check != 1) {
+                failure_type = (flat_check == 0) ? 1 : 2;
+                return 0;
+            }
+            p = flat_p;
+
+            if (!flat_is_stop) {
+                float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
+                float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
+                vector flat_d; float flat_trans;
+                if (!refract_at_flat_plane(d, fn1, fn2, coating, flat_d, flat_trans)) {
+                    failure_type = 3;
+                    return 0;
+                }
+                total_transmission *= flat_trans;
+                d = flat_d;
+            }
+
+            surfaces_passed += 1;
+            continue;
+        }
+
+        if (result != 1) {
             if (result == 0) failure_type = 1;
             else if (result == -1) failure_type = 2;
             else if (result == -2) failure_type = 3;
@@ -614,12 +617,10 @@ int trace_lens_system(
         d = new_d;
 
         if (radii[idx] != 0.0)
-            pre_flat_idx = -1;
+            saved_idx = -1;
 
-        // A strongly curved surface close to a flat surface can have its
-        // sphere extend past the flat surface's vertex. When the hit point
-        // overshoots, project the refracted ray back to the flat surface's
-        // plane for the aperture check.
+        // Overshoot: a curved surface hit overshoots past the next flat
+        // surface's vertex. Handle the flat surface now and skip it later.
         if (idx > 0 && radii[idx - 1] == 0.0 && p[2] < vertex_z[idx - 1]) {
             int next_idx = idx - 1;
             float next_semi_ap = apertures[next_idx] * 0.5;
@@ -649,7 +650,7 @@ int trace_lens_system(
             }
 
             surfaces_passed += 1;
-            skip_surface = 1;
+            skip_count = 1;
         }
     }
 
