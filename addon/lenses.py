@@ -25,12 +25,20 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{toml_path.name}: stop_index {stop_index} is out of range "
                 f"for {len(surfaces)} surfaces"
             )
+        coating = lens.get("coating", "none")
+        valid_coatings = ("none", "single", "multi")
+        if coating not in valid_coatings:
+            raise ValueError(
+                f"{toml_path.name}: coating {coating!r} must be one of "
+                f"{valid_coatings}"
+            )
         lenses.append({
             "name": lens["name"],
             "filename_stem": toml_path.stem,
             "focal_length": lens["focal_length"],
             "max_fstop": lens["max_fstop"],
             "stop_index": stop_index,
+            "coating": coating,
             "surfaces": surfaces,
         })
     return lenses
