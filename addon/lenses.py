@@ -33,13 +33,23 @@ def _parse_focus(data: dict, surfaces: list[dict], filename: str) -> dict | None
         return None
 
     close_distance = focus_raw["close_distance"]
+    if not isinstance(close_distance, (int, float)) or close_distance <= 0:
+        raise ValueError(
+            f"{filename}: focus.close_distance {close_distance!r} "
+            f"must be a positive number"
+        )
     variables_raw = focus_raw.get("variable", [])
     if not variables_raw:
         raise ValueError(f"{filename}: [focus] section has no [[focus.variable]] entries")
 
     variables = []
+    seen_surfaces = set()
     for v in variables_raw:
         idx = v["surface"]
+        if idx in seen_surfaces:
+            raise ValueError(
+                f"{filename}: focus.variable surface {idx} listed more than once"
+            )
         if idx < 0 or idx >= len(surfaces):
             raise ValueError(
                 f"{filename}: focus.variable surface {idx} out of range "
@@ -56,6 +66,7 @@ def _parse_focus(data: dict, surfaces: list[dict], filename: str) -> dict | None
                 f"{filename}: focus.variable surface {idx} has negative "
                 f"thickness_close {thickness_close}"
             )
+        seen_surfaces.add(idx)
         variables.append({"surface": idx, "thickness_close": thickness_close})
 
     return {"close_distance": close_distance, "variables": variables}
