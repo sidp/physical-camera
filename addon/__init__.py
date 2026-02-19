@@ -26,7 +26,14 @@ def _get_lens_items(self, context):
 
 
 def _lens_index(props):
-    return _lens_index_map.get(props.lens, 0)
+    idx = _lens_index_map.get(props.lens)
+    if idx is not None:
+        return idx
+    if props.lens.isdigit():
+        i = int(props.lens)
+        if 0 <= i < len(_lens_registry):
+            return i
+    return 0
 
 
 def _get_or_create_text_block():
