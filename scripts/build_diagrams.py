@@ -31,7 +31,7 @@ _RAY_COLOR = (255, 190, 100, 160)
 
 
 def _is_stop(s):
-    return s["radius"] == 0.0 and s["ior"] <= 1.0
+    return s.get("type") == "stop"
 
 
 def _compute_vertex_positions(surfaces):
