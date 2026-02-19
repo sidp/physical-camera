@@ -13,11 +13,11 @@ def load_previews(lenses):
     cleanup()
     _preview_collection = bpy.utils.previews.new()
     previews_dir = Path(__file__).parent / "previews"
-    for i, lens in enumerate(lenses):
-        key = f"lens_{i}"
-        png_path = previews_dir / f"{lens['filename_stem']}.png"
+    for lens in lenses:
+        stem = lens['filename_stem']
+        png_path = previews_dir / f"{stem}.png"
         if png_path.exists():
-            _preview_collection.load(key, str(png_path), 'IMAGE')
+            _preview_collection.load(stem, str(png_path), 'IMAGE')
 
 
 def has_previews():
@@ -25,13 +25,12 @@ def has_previews():
     return _preview_collection is not None and len(_preview_collection) > 0
 
 
-def get_icon_id(lens_index):
-    """Return the preview icon_id for a given lens index, or 0 if not ready."""
+def get_icon_id(filename_stem):
+    """Return the preview icon_id for a given lens filename stem, or 0."""
     if _preview_collection is None:
         return 0
-    key = f"lens_{lens_index}"
-    if key in _preview_collection:
-        return _preview_collection[key].icon_id
+    if filename_stem in _preview_collection:
+        return _preview_collection[filename_stem].icon_id
     return 0
 
 

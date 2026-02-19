@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 MAX_SURFACES = 24
-VALID_SURFACE_TYPES = ("spherical", "flat", "stop")
+VALID_SURFACE_TYPES = ("spherical", "flat", "stop", "aspheric")
 
 
 def _resolve_surface_types(surfaces: list[dict], filename: str) -> list[str]:
@@ -93,6 +93,25 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{valid_coatings}"
             )
         surface_types = _resolve_surface_types(surfaces, toml_path.name)
+        for i, (s, st) in enumerate(zip(surfaces, surface_types)):
+            if st == "aspheric":
+                if s["radius"] == 0:
+                    raise ValueError(
+                        f"{toml_path.name}: aspheric surface {i} must have "
+                        f"nonzero radius"
+                    )
+                coeffs = s.get("aspheric_coeffs")
+                if not isinstance(coeffs, list) or len(coeffs) != 3:
+                    raise ValueError(
+                        f"{toml_path.name}: aspheric surface {i} must have "
+                        f"aspheric_coeffs as a list of 3 floats"
+                    )
+            else:
+                if "aspheric_coeffs" in s or "conic" in s:
+                    raise ValueError(
+                        f"{toml_path.name}: non-aspheric surface {i} must "
+                        f"not have aspheric_coeffs or conic"
+                    )
         stop_count = surface_types.count("stop")
         if stop_count != 1:
             raise ValueError(
