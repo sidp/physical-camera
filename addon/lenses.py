@@ -26,6 +26,41 @@ def _resolve_surface_types(surfaces: list[dict], filename: str) -> list[str]:
     return types
 
 
+def _parse_focus(data: dict, surfaces: list[dict], filename: str) -> dict | None:
+    """Parse optional [focus] section from lens TOML data."""
+    focus_raw = data.get("focus")
+    if focus_raw is None:
+        return None
+
+    close_distance = focus_raw["close_distance"]
+    variables_raw = focus_raw.get("variable", [])
+    if not variables_raw:
+        raise ValueError(f"{filename}: [focus] section has no [[focus.variable]] entries")
+
+    variables = []
+    for v in variables_raw:
+        idx = v["surface"]
+        if idx < 0 or idx >= len(surfaces):
+            raise ValueError(
+                f"{filename}: focus.variable surface {idx} out of range "
+                f"(0..{len(surfaces) - 1})"
+            )
+        if surfaces[idx]["ior"] != 1.0:
+            raise ValueError(
+                f"{filename}: focus.variable surface {idx} has ior "
+                f"{surfaces[idx]['ior']} (expected 1.0 for air gap)"
+            )
+        thickness_close = v["thickness_close"]
+        if thickness_close < 0:
+            raise ValueError(
+                f"{filename}: focus.variable surface {idx} has negative "
+                f"thickness_close {thickness_close}"
+            )
+        variables.append({"surface": idx, "thickness_close": thickness_close})
+
+    return {"close_distance": close_distance, "variables": variables}
+
+
 def load_lenses(lens_dir: Path) -> list[dict]:
     """Read all .toml lens files from lens_dir, sorted by filename."""
     lenses = []
@@ -54,6 +89,7 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"found {stop_count}"
             )
         stop_index = surface_types.index("stop")
+        focus = _parse_focus(data, surfaces, toml_path.name)
         lenses.append({
             "name": lens["name"],
             "filename_stem": toml_path.stem,
@@ -63,5 +99,6 @@ def load_lenses(lens_dir: Path) -> list[dict]:
             "coating": coating,
             "surfaces": surfaces,
             "surface_types": surface_types,
+            "focus": focus,
         })
     return lenses
