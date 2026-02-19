@@ -67,6 +67,19 @@ float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float 
     return 1.0 - R;
 }
 
+int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
+{
+    float r = sqrt(x * x + y * y);
+    if (r < 1e-10)
+        return 1;
+    float sector_angle = 2.0 * M_PI / float(num_blades);
+    float angle = atan2(y, x) - rotation_rad;
+    angle = angle - floor(angle / (2.0 * M_PI)) * 2.0 * M_PI;
+    float theta = mod(angle, sector_angle) - sector_angle * 0.5;
+    float max_r = semi_ap * cos(M_PI / float(num_blades)) / cos(theta);
+    return (r <= max_r) ? 1 : 0;
+}
+
 // Project ray to a z-plane and check circular or n-gon aperture.
 // Returns 1 if the ray passes, 0 if projection fails, -1 if clipped.
 // Sets out_p to the projected point on success.
@@ -299,19 +312,6 @@ void compute_field_exit_pupil(
         ep_r = aim_semi_ap;
     if (ep_r < 0.0)
         ep_r = 0.0;
-}
-
-int point_in_ngon(float x, float y, float semi_ap, int num_blades, float rotation_rad)
-{
-    float r = sqrt(x * x + y * y);
-    if (r < 1e-10)
-        return 1;
-    float sector_angle = 2.0 * M_PI / float(num_blades);
-    float angle = atan2(y, x) - rotation_rad;
-    angle = angle - floor(angle / (2.0 * M_PI)) * 2.0 * M_PI;
-    float theta = mod(angle, sector_angle) - sector_angle * 0.5;
-    float max_r = semi_ap * cos(M_PI / float(num_blades)) / cos(theta);
-    return (r <= max_r) ? 1 : 0;
 }
 
 int intersect_sphere(
