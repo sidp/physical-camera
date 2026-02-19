@@ -38,6 +38,24 @@ color wavelength_to_rgb(float lambda)
     return color(max(r, 0.0), max(g, 0.0), max(b, 0.0));
 }
 
+float coating_reduction(float n1, float n2, float coating)
+{
+    if (coating < 0.5 || min(n1, n2) >= 1.01)
+        return 0.0;
+    float nc = 1.38;
+    float lo = min(n1, n2);
+    float hi = max(n1, n2);
+    float r1 = (lo - nc) / (lo + nc);
+    float r2 = (nc - hi) / (nc + hi);
+    float denom = 1.0 - r1 * r2;
+    float R_coated = (r1 - r2) * (r1 - r2) / (denom * denom);
+    float R_bare = (lo - hi) * (lo - hi) / ((lo + hi) * (lo + hi));
+    float reduction = (R_bare > 1e-10) ? 1.0 - R_coated / R_bare : 0.0;
+    if (coating > 1.5)
+        reduction = max(reduction, 0.99);
+    return reduction;
+}
+
 float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float coating)
 {
     if (n1 == n2)
@@ -45,22 +63,7 @@ float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float 
     float rs = (n1 * cos_i - n2 * cos_t) / (n1 * cos_i + n2 * cos_t);
     float rp = (n1 * cos_t - n2 * cos_i) / (n1 * cos_t + n2 * cos_i);
     float R = (rs * rs + rp * rp) * 0.5;
-
-    if (coating > 0.5 && min(n1, n2) < 1.01) {
-        float nc = 1.38;
-        float lo = min(n1, n2);
-        float hi = max(n1, n2);
-        float r1 = (lo - nc) / (lo + nc);
-        float r2 = (nc - hi) / (nc + hi);
-        float denom = 1.0 - r1 * r2;
-        float R_coated = (r1 - r2) * (r1 - r2) / (denom * denom);
-        float R_bare_normal = (lo - hi) * (lo - hi) / ((lo + hi) * (lo + hi));
-        float reduction = (R_bare_normal > 1e-10) ? 1.0 - R_coated / R_bare_normal : 0.0;
-        if (coating > 1.5)
-            reduction = max(reduction, 0.99);
-        R *= (1.0 - reduction);
-    }
-
+    R *= (1.0 - coating_reduction(n1, n2, coating));
     return 1.0 - R;
 }
 
@@ -77,21 +80,7 @@ float onaxis_fresnel_transmission(
         if (n1 == n2)
             continue;
         float R = (n1 - n2) * (n1 - n2) / ((n1 + n2) * (n1 + n2));
-
-        if (coating > 0.5 && min(n1, n2) < 1.01) {
-            float nc = 1.38;
-            float lo = min(n1, n2);
-            float hi = max(n1, n2);
-            float r1 = (lo - nc) / (lo + nc);
-            float r2 = (nc - hi) / (nc + hi);
-            float denom = 1.0 - r1 * r2;
-            float R_coated = (r1 - r2) * (r1 - r2) / (denom * denom);
-            float reduction = (R > 1e-10) ? 1.0 - R_coated / R : 0.0;
-            if (coating > 1.5)
-                reduction = max(reduction, 0.99);
-            R *= (1.0 - reduction);
-        }
-
+        R *= (1.0 - coating_reduction(n1, n2, coating));
         T *= 1.0 - R;
     }
     return T;
