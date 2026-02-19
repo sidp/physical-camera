@@ -66,7 +66,6 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output int surface_types[MAX_SURFACES],",
         "    output float extra[MAX_EXTRA],",
         "    output int num_surfaces,",
-        "    output int stop_index,",
         "    output float coating)",
         "{",
     ]
@@ -77,7 +76,6 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         lines.append(f"    {keyword} (lens_type == {i}) {{")
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
-        lines.append(f"        stop_index = {lens['stop_index']};")
         lines.append(f"        coating = {coating_val};")
         lines.append(_format_surface_assignments(
             lens["surfaces"], lens["surface_types"]
@@ -89,7 +87,6 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
     lines.append("    else {")
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
-    lines.append(f"        stop_index = {default['stop_index']};")
     lines.append(f"        coating = {default_coating};")
     lines.append(_format_surface_assignments(
         default["surfaces"], default["surface_types"]
