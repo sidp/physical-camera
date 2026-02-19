@@ -58,15 +58,15 @@ ior = 1.0
 aperture = 105.44
 abbe_v = 0.0
 
-# Patent surface 8 is aspherical (A4=-2.2875e-6, A6=-2.1286e-10, A8=2.6709e-13).
-# Approximated as spherical using base radius only — will produce less spherical
-# aberration correction than the real lens, especially at wide apertures.
 [[surface]]
+type = "aspheric"
 radius = 75.484
 thickness = 2.5
 ior = 1.85478
 aperture = 82.48
 abbe_v = 24.8
+conic = 0.0
+aspheric_coeffs = [-2.2875e-6, -2.1286e-10, 2.6709e-13]
 
 [[surface]]
 radius = 27.701

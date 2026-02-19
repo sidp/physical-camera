@@ -4,10 +4,10 @@ from pathlib import Path
 
 from .lenses import MAX_SURFACES, load_lenses
 
-N_EXTRA = 4
+N_EXTRA = 8
 
 _COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
-_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2}
+_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3}
 
 
 def _format_surface_assignments(
@@ -40,13 +40,21 @@ def _format_surface_assignments(
             f"        surface_types[{i}] = {_TYPE_VALUES[st]};"
         )
     lines.append("")
-    for i in range(len(surfaces)):
+    for i, s in enumerate(surfaces):
         base = i * N_EXTRA
+        k = s.get("conic", 0.0)
+        coeffs = s.get("aspheric_coeffs", [0.0, 0.0, 0.0])
         lines.append(
-            f"        extra[{base}] = 0.0;  "
-            f"extra[{base + 1}] = 0.0;  "
-            f"extra[{base + 2}] = 0.0;  "
-            f"extra[{base + 3}] = 0.0;"
+            f"        extra[{base}] = {k};  "
+            f"extra[{base + 1}] = {coeffs[0]};  "
+            f"extra[{base + 2}] = {coeffs[1]};  "
+            f"extra[{base + 3}] = {coeffs[2]};"
+        )
+        lines.append(
+            f"        extra[{base + 4}] = 0.0;  "
+            f"extra[{base + 5}] = 0.0;  "
+            f"extra[{base + 6}] = 0.0;  "
+            f"extra[{base + 7}] = 0.0;"
         )
     return "\n".join(lines)
 
@@ -62,11 +70,13 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "#define SURFACE_SPHERICAL 0",
         "#define SURFACE_FLAT      1",
         "#define SURFACE_STOP      2",
+        "#define SURFACE_ASPHERIC  3",
         "",
-        "// extra[i*N_EXTRA + 0] = conic constant (future: aspheric surfaces)",
-        "// extra[i*N_EXTRA + 1] = reserved (future: second radius for anamorphic)",
-        "// extra[i*N_EXTRA + 2] = reserved",
-        "// extra[i*N_EXTRA + 3] = reserved",
+        "// extra[i*N_EXTRA + 0] = k (conic constant)",
+        "// extra[i*N_EXTRA + 1] = A4 (4th-order aspheric coefficient)",
+        "// extra[i*N_EXTRA + 2] = A6 (6th-order aspheric coefficient)",
+        "// extra[i*N_EXTRA + 3] = A8 (8th-order aspheric coefficient)",
+        "// extra[i*N_EXTRA + 4..7] = reserved",
         "",
         "void load_lens_data(",
         "    int lens_type,",
