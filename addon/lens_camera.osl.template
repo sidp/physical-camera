@@ -845,7 +845,8 @@ shader lens_camera(
         num_surfaces, radii, thicknesses, iors, surface_types, total_length, focus_mm);
 
     // camera_shader_random_sample() provides two uniform values in x/y.
-    // x = aperture angle (sector + barycentric u1), y = aperture radius (u2).
+    // x = aperture angle (sector + barycentric u1), y = barycentric u2; the
+    // actual aperture radius is derived from both barycentric coordinates.
     // Wavelength is derived from a hash of both to avoid correlation with
     // aperture position — a linear mapping would preserve the quasi-random
     // sequence structure and create systematic color-position patterns.
