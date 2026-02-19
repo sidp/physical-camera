@@ -706,10 +706,13 @@ shader lens_camera(
     float iors[MAX_SURFACES];
     float apertures[MAX_SURFACES];
     float abbe_v[MAX_SURFACES];
+    int surface_types[MAX_SURFACES];
+    float extra[MAX_EXTRA];
     int num_surfaces = 0;
     int stop_index = 0;
     float coating = 0.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
+                   surface_types, extra,
                    num_surfaces, stop_index, coating);
 
     float total_length = 0.0;
