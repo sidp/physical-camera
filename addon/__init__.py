@@ -17,6 +17,7 @@ _TEXT_BLOCK_NAME = "Physical Lens OSL"
 
 _lens_registry: list[dict] = []
 _lens_items: list[tuple] = []
+_lens_index_map: dict[str, int] = {}
 _osl_source: str = ""
 
 
@@ -25,7 +26,7 @@ def _get_lens_items(self, context):
 
 
 def _lens_index(props):
-    return int(props.lens) if props.lens else 0
+    return _lens_index_map.get(props.lens, 0)
 
 
 def _get_or_create_text_block():
@@ -257,8 +258,7 @@ class CAMERA_PT_physical_lens_diagram(bpy.types.Panel):
 
     def draw(self, context):
         props = context.object.data.physical_camera
-        lens_index = _lens_index(props)
-        icon_id = diagram.get_icon_id(lens_index)
+        icon_id = diagram.get_icon_id(props.lens)
         if icon_id:
             row = self.layout.row()
             row.alignment = 'CENTER'
@@ -296,7 +296,7 @@ def _on_load_post(_):
 
 
 def register():
-    global _lens_registry, _lens_items, _osl_source
+    global _lens_registry, _lens_items, _lens_index_map, _osl_source
 
     addon_dir = Path(__file__).parent
     template_path = addon_dir / "lens_camera.osl.template"
@@ -306,8 +306,11 @@ def register():
     _osl_source = osl_source
     _lens_registry = lenses
     _lens_items = [
-        (str(i), lens["name"], "") for i, lens in enumerate(lenses)
+        (lens["filename_stem"], lens["name"], "") for lens in lenses
     ]
+    _lens_index_map = {
+        lens["filename_stem"]: i for i, lens in enumerate(lenses)
+    }
 
     diagram.load_previews(_lens_registry)
 
