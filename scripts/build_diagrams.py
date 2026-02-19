@@ -78,24 +78,32 @@ def _arc_points(vertex_x, radius, semi_ap, to_px, steps=64):
     return points
 
 
-def _element_polygon(surfaces, positions, front_i, back_i, to_px):
+def _effective_semi_aperture(front_vx, front_r, front_ap, back_vx, back_r, back_ap):
+    """Max semi-aperture where the front arc doesn't extend past the back arc."""
+    max_ap = min(front_ap, back_ap)
+    if _arc_x(front_vx, front_r, max_ap) <= _arc_x(back_vx, back_r, max_ap):
+        return front_ap, back_ap
+    # Binary search for the crossing height
+    lo, hi = 0.0, max_ap
+    for _ in range(50):
+        mid = (lo + hi) * 0.5
+        if _arc_x(front_vx, front_r, mid) <= _arc_x(back_vx, back_r, mid):
+            lo = mid
+        else:
+            hi = mid
+    return lo, lo
+
+
+def _element_polygon(surfaces, positions, front_i, back_i, effective_aps, to_px):
     """Build a polygon outline for a glass element between two surfaces."""
-    front_s = surfaces[front_i]
-    back_s = surfaces[back_i]
     front_vx = positions[front_i]
     back_vx = positions[back_i]
-    front_r = front_s["radius"]
-    back_r = back_s["radius"]
-    front_ap = front_s["aperture"] * 0.5
-    back_ap = back_s["aperture"] * 0.5
+    front_r = surfaces[front_i]["radius"]
+    back_r = surfaces[back_i]["radius"]
 
-    # Front arc from -front_ap to +front_ap
-    front_pts = _arc_points(front_vx, front_r, front_ap, to_px)
-    # Back arc from -back_ap to +back_ap
-    back_pts = _arc_points(back_vx, back_r, back_ap, to_px)
+    front_pts = _arc_points(front_vx, front_r, effective_aps[front_i], to_px)
+    back_pts = _arc_points(back_vx, back_r, effective_aps[back_i], to_px)
 
-    # Polygon: front arc top-to-bottom, closing edge to back bottom,
-    # back arc bottom-to-top, closing edge to front top
     polygon = list(front_pts)
     polygon.append(back_pts[-1])
     polygon.extend(reversed(back_pts))
@@ -222,14 +230,26 @@ def _render_lens(surfaces):
     img = Image.new("RGBA", (size, size), _BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    positions = _compute_vertex_positions(surfaces)
     elements = _find_elements(surfaces)
-
-    total_length = positions[-1]
     max_aperture = max(s["aperture"] for s in surfaces) * 0.5
 
+    # Adaptive padding: reduce vertical padding for lenses where height
+    # dominates width, so the front elements can extend closer to the
+    # icon edges and the rear elements get more horizontal room.
+    positions = _compute_vertex_positions(surfaces)
+    total_length = positions[-1]
+    aspect_ratio = (2 * max_aperture) / total_length if total_length > 0 else 1.0
+    if aspect_ratio > 1.2:
+        # Interpolate vertical padding from full to minimal as ratio grows
+        t = min((aspect_ratio - 1.2) / 0.8, 1.0)
+        min_padding = 4 * _SUPERSAMPLE
+        v_padding = _PADDING + t * (min_padding - _PADDING)
+    else:
+        v_padding = _PADDING
+
     draw_w = size - 2 * _PADDING
-    draw_h = size - 2 * _PADDING
+    draw_h = size - 2 * v_padding
+
     scale_x = draw_w / total_length if total_length > 0 else 1.0
     scale_y = draw_h / (2 * max_aperture) if max_aperture > 0 else 1.0
     scale = min(scale_x, scale_y)
@@ -249,17 +269,38 @@ def _render_lens(surfaces):
         dash=8 * _SUPERSAMPLE, gap=6 * _SUPERSAMPLE,
     )
 
+    # Compute effective drawing aperture for every surface, clamped where
+    # adjacent arcs would cross — both within elements and across air gaps.
+    effective_aps = []
+    for i, s in enumerate(surfaces):
+        eff = s["aperture"] * 0.5
+        if i > 0 and not _is_stop(surfaces[i - 1]):
+            s_prev = surfaces[i - 1]
+            _, back_ap = _effective_semi_aperture(
+                positions[i - 1], s_prev["radius"], s_prev["aperture"] * 0.5,
+                positions[i], s["radius"], eff,
+            )
+            eff = min(eff, back_ap)
+        if i < len(surfaces) - 1 and not _is_stop(surfaces[i + 1]):
+            s_next = surfaces[i + 1]
+            front_ap, _ = _effective_semi_aperture(
+                positions[i], s["radius"], eff,
+                positions[i + 1], s_next["radius"], s_next["aperture"] * 0.5,
+            )
+            eff = min(eff, front_ap)
+        effective_aps.append(eff)
+
     # Fill glass elements
     for front_i, back_i in elements:
         for j in range(front_i, back_i):
-            poly = _element_polygon(surfaces, positions, j, j + 1, to_px)
+            poly = _element_polygon(surfaces, positions, j, j + 1, effective_aps, to_px)
             draw.polygon(poly, fill=_GLASS_FILL)
 
     # Draw surface arcs
     for i, s in enumerate(surfaces):
         if _is_stop(s):
             continue
-        semi_ap = s["aperture"] * 0.5
+        semi_ap = effective_aps[i]
         is_cemented = False
         for front_i, back_i in elements:
             if front_i < i < back_i:
@@ -275,17 +316,15 @@ def _render_lens(surfaces):
     # Draw element closing edges
     for front_i, back_i in elements:
         for j in range(front_i, back_i):
-            s_j = surfaces[j]
-            s_j1 = surfaces[j + 1]
-            ap_j = s_j["aperture"] * 0.5
-            ap_j1 = s_j1["aperture"] * 0.5
+            ap_j = effective_aps[j]
+            ap_j1 = effective_aps[j + 1]
             for sign in (1.0, -1.0):
                 p0 = to_px(
-                    _arc_x(positions[j], s_j["radius"], sign * ap_j),
+                    _arc_x(positions[j], surfaces[j]["radius"], sign * ap_j),
                     sign * ap_j,
                 )
                 p1 = to_px(
-                    _arc_x(positions[j + 1], s_j1["radius"], sign * ap_j1),
+                    _arc_x(positions[j + 1], surfaces[j + 1]["radius"], sign * ap_j1),
                     sign * ap_j1,
                 )
                 draw.line([p0, p1], fill=_SURFACE_LINE, width=2 * _SUPERSAMPLE)
@@ -312,12 +351,18 @@ def _render_lens(surfaces):
                     width=4 * _SUPERSAMPLE,
                 )
 
-    # Trace example rays
-    first_semi_ap = surfaces[0]["aperture"] * 0.5
+    # Trace example rays — use the stop semi-aperture as the reference
+    # height, since it defines the actual ray bundle that passes through
+    # the system. For retrofocus designs the front element is much larger
+    # than the useful ray bundle.
+    stop_aps = [s["aperture"] * 0.5 for s in surfaces if _is_stop(s)]
+    ray_semi_ap = stop_aps[0] if stop_aps else (
+        min(s["aperture"] * 0.5 for s in surfaces)
+    )
     clip_left = _PADDING * 0.5
     clip_right = size - _PADDING * 0.5
     for frac in (0.7, 0.5, 0.35, -0.35, -0.5, -0.7):
-        ray_pts = _trace_ray(surfaces, positions, frac * first_semi_ap)
+        ray_pts = _trace_ray(surfaces, positions, frac * ray_semi_ap)
         if ray_pts and len(ray_pts) >= 2:
             px_pts = [to_px(x, y) for x, y in ray_pts]
             # Clip to drawing area
