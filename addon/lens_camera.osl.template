@@ -844,17 +844,19 @@ shader lens_camera(
     float sensor_distance = compute_sensor_distance(
         num_surfaces, radii, thicknesses, iors, surface_types, total_length, focus_mm);
 
-    // camera_shader_random_sample() provides two independent uniform values in x/y.
-    // x = aperture angle, y = wavelength (+ golden-ratio rotation for aperture radius).
+    // camera_shader_random_sample() provides two uniform values in x/y.
+    // x = aperture angle (sector + barycentric u1), y = aperture radius (u2).
+    // Wavelength is derived from a hash of both to avoid correlation with
+    // aperture position — a linear mapping would preserve the quasi-random
+    // sequence structure and create systematic color-position patterns.
     point rnd = camera_shader_random_sample();
 
     // Wavelength sampling for chromatic aberration
     float lambda = 587.6;
     float r_param = rnd[1];
     if (chromatic_aberration) {
-        lambda = 400.0 + rnd[1] * 300.0;
-        r_param = rnd[1] + 0.6180339887;
-        r_param = r_param - floor(r_param);
+        float h = sin(rnd[0] * 12.9898 + rnd[1] * 78.233) * 43758.5453;
+        lambda = 400.0 + (h - floor(h)) * 300.0;
     }
 
     // Compute wavelength-adjusted IOR for exit pupil aiming and Fresnel
@@ -904,9 +906,9 @@ shader lens_camera(
     float ax = 0.0;
     float ay = 0.0;
 
-    // Always use ngon sampling: the barycentric mixing of both random
-    // dimensions into the radial component prevents wavelength-radius
-    // correlation that causes color casts with chromatic aberration.
+    // Ngon barycentric sampling: rnd[0] selects the sector and u1,
+    // rnd[1] provides u2. Wavelength is hashed separately so it has
+    // no systematic relationship to aperture position.
     // For circular aperture (blades=0), use 128-gon as a proxy.
     {
         int n = (aperture_blades >= 3) ? aperture_blades : 128;
