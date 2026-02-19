@@ -20,6 +20,9 @@ def _format_surface_assignments(surfaces: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
+
+
 def _generate_load_lens_data(lenses: list[dict]) -> str:
     """Generate the #define and load_lens_data() function."""
     lines = [
@@ -33,24 +36,29 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output float apertures[MAX_SURFACES],",
         "    output float abbe_v[MAX_SURFACES],",
         "    output int num_surfaces,",
-        "    output int stop_index)",
+        "    output int stop_index,",
+        "    output float coating)",
         "{",
     ]
 
     for i, lens in enumerate(lenses):
         keyword = "if" if i == 0 else "else if"
+        coating_val = _COATING_VALUES[lens["coating"]]
         lines.append(f"    {keyword} (lens_type == {i}) {{")
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
         lines.append(f"        stop_index = {lens['stop_index']};")
+        lines.append(f"        coating = {coating_val};")
         lines.append(_format_surface_assignments(lens["surfaces"]))
         lines.append("    }")
 
     default = lenses[0]
+    default_coating = _COATING_VALUES[default["coating"]]
     lines.append("    else {")
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
     lines.append(f"        stop_index = {default['stop_index']};")
+    lines.append(f"        coating = {default_coating};")
     lines.append(_format_surface_assignments(default["surfaces"]))
     lines.append("    }")
 
