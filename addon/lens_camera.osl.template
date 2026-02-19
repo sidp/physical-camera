@@ -67,6 +67,61 @@ float fresnel_transmittance(float n1, float n2, float cos_i, float cos_t, float 
     return 1.0 - R;
 }
 
+// Project ray to a z-plane and check circular or n-gon aperture.
+// Returns 1 if the ray passes, 0 if projection fails, -1 if clipped.
+// Sets out_p to the projected point on success.
+int check_aperture_at_plane(
+    point p, vector d,
+    float plane_z, float semi_aperture,
+    int is_stop, int num_blades, float blade_rotation,
+    output point out_p)
+{
+    if (abs(d[2]) <= 1e-10)
+        return 0;
+
+    float t = (plane_z - p[2]) / d[2];
+    float hx = p[0] + t * d[0];
+    float hy = p[1] + t * d[1];
+
+    if (is_stop && num_blades >= 3) {
+        if (!point_in_ngon(hx, hy, semi_aperture, num_blades, blade_rotation))
+            return -1;
+    } else {
+        float r = sqrt(hx * hx + hy * hy);
+        if (r > semi_aperture)
+            return -1;
+    }
+
+    out_p = point(hx, hy, plane_z);
+    return 1;
+}
+
+// Snell's law at a flat surface with Fresnel transmittance.
+// Returns 1 on success, 0 on TIR.
+int refract_at_flat_plane(
+    vector d_in, float n1, float n2, float coating,
+    output vector d_out, output float transmission)
+{
+    if (n1 == n2) {
+        d_out = d_in;
+        transmission = 1.0;
+        return 1;
+    }
+
+    vector N = vector(0, 0, -1);
+    vector I = normalize(d_in);
+    if (dot(I, N) > 0.0)
+        N = -N;
+    float cos_i = abs(dot(I, N));
+    vector refracted = refract(I, N, n1 / n2);
+    if (dot(refracted, refracted) < 1e-10)
+        return 0;
+    float cos_t = abs(dot(refracted, N));
+    transmission = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
+    d_out = refracted;
+    return 1;
+}
+
 float onaxis_fresnel_transmission(
     int num_surfaces,
     float radii[MAX_SURFACES],
@@ -517,55 +572,30 @@ int trace_lens_system(
                 d = new_d;
 
                 int flat_idx = idx + 1;
-                float flat_z = vertex_z[flat_idx];
                 float flat_semi_ap = apertures[flat_idx] * 0.5;
                 int flat_is_stop = (flat_idx == stop_index) ? 1 : 0;
-
                 if (flat_is_stop)
                     flat_semi_ap *= aperture_scale;
 
-                if (abs(d[2]) <= 1e-10) {
-                    failure_type = 1;
+                point flat_p;
+                int flat_check = check_aperture_at_plane(p, d, vertex_z[flat_idx], flat_semi_ap,
+                                                         flat_is_stop, num_blades, blade_rotation, flat_p);
+                if (flat_check != 1) {
+                    failure_type = (flat_check == 0) ? 1 : 2;
                     return 0;
                 }
-
-                float t_proj = (flat_z - p[2]) / d[2];
-                float check_x = p[0] + t_proj * d[0];
-                float check_y = p[1] + t_proj * d[1];
-
-                if (flat_is_stop && num_blades >= 3) {
-                    if (!point_in_ngon(check_x, check_y, flat_semi_ap, num_blades, blade_rotation)) {
-                        failure_type = 2;
-                        return 0;
-                    }
-                } else {
-                    float r_check = sqrt(check_x * check_x + check_y * check_y);
-                    if (r_check > flat_semi_ap) {
-                        failure_type = 2;
-                        return 0;
-                    }
-                }
-
-                p = point(check_x, check_y, flat_z);
+                p = flat_p;
 
                 if (!flat_is_stop) {
                     float fn1 = cauchy_ior(iors[flat_idx], abbe_v[flat_idx], lambda_nm);
                     float fn2 = (flat_idx > 0) ? cauchy_ior(iors[flat_idx - 1], abbe_v[flat_idx - 1], lambda_nm) : 1.0;
-                    if (fn1 != fn2) {
-                        vector fN = vector(0, 0, -1);
-                        vector fI = normalize(d);
-                        if (dot(fI, fN) > 0.0)
-                            fN = -fN;
-                        float fcos_i = abs(dot(fI, fN));
-                        vector refr = refract(fI, fN, fn1 / fn2);
-                        if (dot(refr, refr) < 1e-10) {
-                            failure_type = 3;
-                            return 0;
-                        }
-                        float fcos_t = abs(dot(refr, fN));
-                        total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
-                        d = refr;
+                    vector flat_d; float flat_trans;
+                    if (!refract_at_flat_plane(d, fn1, fn2, coating, flat_d, flat_trans)) {
+                        failure_type = 3;
+                        return 0;
                     }
+                    total_transmission *= flat_trans;
+                    d = flat_d;
                 }
 
                 surfaces_passed += 1;
@@ -589,60 +619,33 @@ int trace_lens_system(
         // A strongly curved surface close to a flat surface can have its
         // sphere extend past the flat surface's vertex. When the hit point
         // overshoots, project the refracted ray back to the flat surface's
-        // plane for the aperture check — this gives the correct air-side
-        // position where light physically crosses the flat surface.
+        // plane for the aperture check.
         if (idx > 0 && radii[idx - 1] == 0.0 && p[2] < vertex_z[idx - 1]) {
             int next_idx = idx - 1;
-            float flat_z = vertex_z[next_idx];
             float next_semi_ap = apertures[next_idx] * 0.5;
             int next_is_stop = (next_idx == stop_index) ? 1 : 0;
-
             if (next_is_stop)
                 next_semi_ap *= aperture_scale;
 
-            // Project refracted ray back to the flat surface plane
-            if (abs(d[2]) <= 1e-10) {
-                failure_type = 1;
+            point next_p;
+            int next_check = check_aperture_at_plane(p, d, vertex_z[next_idx], next_semi_ap,
+                                                     next_is_stop, num_blades, blade_rotation, next_p);
+            if (next_check != 1) {
+                failure_type = (next_check == 0) ? 1 : 2;
                 return 0;
             }
-
-            float t_proj = (flat_z - p[2]) / d[2];
-            float check_x = p[0] + t_proj * d[0];
-            float check_y = p[1] + t_proj * d[1];
-
-            if (next_is_stop && num_blades >= 3) {
-                if (!point_in_ngon(check_x, check_y, next_semi_ap, num_blades, blade_rotation)) {
-                    failure_type = 2;
-                    return 0;
-                }
-            } else {
-                float r_check = sqrt(check_x * check_x + check_y * check_y);
-                if (r_check > next_semi_ap) {
-                    failure_type = 2;
-                    return 0;
-                }
-            }
-
-            p = point(check_x, check_y, flat_z);
+            p = next_p;
 
             if (!next_is_stop) {
                 float fn1 = cauchy_ior(iors[next_idx], abbe_v[next_idx], lambda_nm);
                 float fn2 = (next_idx > 0) ? cauchy_ior(iors[next_idx - 1], abbe_v[next_idx - 1], lambda_nm) : 1.0;
-                if (fn1 != fn2) {
-                    vector fN = vector(0, 0, -1);
-                    vector fI = normalize(d);
-                    if (dot(fI, fN) > 0.0)
-                        fN = -fN;
-                    float fcos_i = abs(dot(fI, fN));
-                    vector refr = refract(fI, fN, fn1 / fn2);
-                    if (dot(refr, refr) < 1e-10) {
-                        failure_type = 3;
-                        return 0;
-                    }
-                    float fcos_t = abs(dot(refr, fN));
-                    total_transmission *= fresnel_transmittance(fn1, fn2, fcos_i, fcos_t, coating);
-                    d = refr;
+                vector next_d; float next_trans;
+                if (!refract_at_flat_plane(d, fn1, fn2, coating, next_d, next_trans)) {
+                    failure_type = 3;
+                    return 0;
                 }
+                total_transmission *= next_trans;
+                d = next_d;
             }
 
             surfaces_passed += 1;
