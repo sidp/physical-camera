@@ -10,8 +10,16 @@ _COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
 _TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2}
 
 
-def _format_surface_assignments(surfaces: list[dict], surface_types: list[str]) -> str:
+def _format_surface_assignments(
+    surfaces: list[dict], surface_types: list[str], focus: dict | None
+) -> str:
     """Generate OSL assignment lines for one lens's surface data."""
+    # Build close-focus thickness lookup from focus data
+    close_thicknesses = {}
+    if focus is not None:
+        for v in focus["variables"]:
+            close_thicknesses[v["surface"]] = v["thickness_close"]
+
     lines = []
     for i, s in enumerate(surfaces):
         idx = f"[{i}]"
@@ -22,6 +30,10 @@ def _format_surface_assignments(surfaces: list[dict], surface_types: list[str]) 
             f"apertures{idx:<4} = {s['aperture']};  "
             f"abbe_v{idx:<4} = {s['abbe_v']};"
         )
+    lines.append("")
+    for i, s in enumerate(surfaces):
+        close_val = close_thicknesses.get(i, s["thickness"])
+        lines.append(f"        thicknesses_close[{i}] = {close_val};")
     lines.append("")
     for i, st in enumerate(surface_types):
         lines.append(
@@ -65,6 +77,8 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output float abbe_v[MAX_SURFACES],",
         "    output int surface_types[MAX_SURFACES],",
         "    output float extra[MAX_EXTRA],",
+        "    output float thicknesses_close[MAX_SURFACES],",
+        "    output float focus_close_distance,",
         "    output int num_surfaces,",
         "    output float coating)",
         "{",
@@ -73,23 +87,29 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
     for i, lens in enumerate(lenses):
         keyword = "if" if i == 0 else "else if"
         coating_val = _COATING_VALUES[lens["coating"]]
+        focus = lens.get("focus")
+        close_dist = focus["close_distance"] if focus else 0.0
         lines.append(f"    {keyword} (lens_type == {i}) {{")
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
         lines.append(f"        coating = {coating_val};")
+        lines.append(f"        focus_close_distance = {close_dist};")
         lines.append(_format_surface_assignments(
-            lens["surfaces"], lens["surface_types"]
+            lens["surfaces"], lens["surface_types"], focus
         ))
         lines.append("    }")
 
     default = lenses[0]
     default_coating = _COATING_VALUES[default["coating"]]
+    default_focus = default.get("focus")
+    default_close_dist = default_focus["close_distance"] if default_focus else 0.0
     lines.append("    else {")
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
     lines.append(f"        coating = {default_coating};")
+    lines.append(f"        focus_close_distance = {default_close_dist};")
     lines.append(_format_surface_assignments(
-        default["surfaces"], default["surface_types"]
+        default["surfaces"], default["surface_types"], default_focus
     ))
     lines.append("    }")
 

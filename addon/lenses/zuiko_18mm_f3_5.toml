@@ -174,3 +174,10 @@ thickness = 0.0
 ior = 1.0
 aperture = 37.12
 abbe_v = 0.0
+
+[focus]
+close_distance = 301.0
+
+[[focus.variable]]
+surface = 16
+thickness_close = 0.89

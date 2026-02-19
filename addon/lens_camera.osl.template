@@ -720,10 +720,12 @@ shader lens_camera(
     float abbe_v[MAX_SURFACES];
     int surface_types[MAX_SURFACES];
     float extra[MAX_EXTRA];
+    float thicknesses_close[MAX_SURFACES];
+    float focus_close_distance = 0.0;
     int num_surfaces = 0;
     float coating = 0.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
-                   surface_types, extra,
+                   surface_types, extra, thicknesses_close, focus_close_distance,
                    num_surfaces, coating);
 
     int stop_index = 0;
@@ -731,11 +733,27 @@ shader lens_camera(
         if (surface_types[i] == SURFACE_STOP) { stop_index = i; break; }
     }
 
+    float focus_mm = focal_distance * 1000.0;
+
+    // Interpolate variable thicknesses for current focus distance.
+    // Uses linear interpolation in reciprocal object-distance space.
+    if (focus_close_distance > 0.0 && focus_mm > 0.0) {
+        float total_length_inf = 0.0;
+        for (int i = 0; i < num_surfaces - 1; i++)
+            total_length_inf += thicknesses[i];
+
+        float d_obj = focus_mm - total_length_inf;
+        float alpha = (d_obj > 0.0)
+            ? clamp(focus_close_distance / d_obj, 0.0, 1.0)
+            : 1.0;
+
+        for (int i = 0; i < num_surfaces; i++)
+            thicknesses[i] = mix(thicknesses[i], thicknesses_close[i], alpha);
+    }
+
     float total_length = 0.0;
     for (int i = 0; i < num_surfaces - 1; i++)
         total_length += thicknesses[i];
-
-    float focus_mm = focal_distance * 1000.0;
     float sensor_distance = compute_sensor_distance(
         num_surfaces, radii, thicknesses, iors, surface_types, total_length, focus_mm);
 
