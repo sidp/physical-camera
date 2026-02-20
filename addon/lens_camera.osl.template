@@ -979,8 +979,21 @@ shader lens_camera(
 
     // Use Y-axis exit pupil for aim position (focus axis)
     float aim_z = (ep_mag_y > 0.0) ? ep_z_y : stop_z;
-    float aim_semi_ap_x = (ep_mag_x > 0.0) ? stop_semi_ap * ep_mag_x : stop_semi_ap;
     float aim_semi_ap_y = (ep_mag_y > 0.0) ? stop_semi_ap * ep_mag_y : stop_semi_ap;
+
+    // Project X exit pupil to the aim plane by matching angular subtense.
+    // For anamorphic lenses the X exit pupil can be far from the Y one
+    // (even behind the sensor), so raw magnification at the wrong Z gives
+    // a wildly wrong aperture size. For spherical lenses ep_z_x == ep_z_y
+    // and the projection is a no-op.
+    float aim_semi_ap_x = aim_semi_ap_y;
+    if (ep_mag_x > 0.0) {
+        float x_pupil_semi_ap = stop_semi_ap * ep_mag_x;
+        float dist_to_ep_x = abs(sensor_z - ep_z_x);
+        float dist_to_aim  = abs(sensor_z - aim_z);
+        if (dist_to_ep_x > 1e-6)
+            aim_semi_ap_x = x_pupil_semi_ap * dist_to_aim / dist_to_ep_x;
+    }
     float aim_semi_ap = max(aim_semi_ap_x, aim_semi_ap_y);
 
     float ep_cx = 0.0, ep_cy = 0.0, field_semi_ap = aim_semi_ap;
