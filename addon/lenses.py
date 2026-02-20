@@ -3,7 +3,7 @@
 import tomllib
 from pathlib import Path
 
-MAX_SURFACES = 24
+MAX_SURFACES = 36
 VALID_SURFACE_TYPES = ("spherical", "flat", "stop", "aspheric", "cylindrical_x", "cylindrical_y")
 
 
