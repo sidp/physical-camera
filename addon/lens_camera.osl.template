@@ -1321,10 +1321,10 @@ shader lens_camera(
         for (int i = 0; i < num_surfaces; i++) {
             surface_R[i] = 0.0;
             if (surface_types[i] == SURFACE_STOP) continue;
-            float n_sensor = iors[i];
-            float n_scene = (i > 0) ? iors[i - 1] : 1.0;
+            float n_sensor = dispersed_iors[i];
+            float n_scene = (i > 0) ? dispersed_iors[i - 1] : 1.0;
             if (n_sensor == n_scene) continue;
-            surface_R[i] = coated_reflectance(n_sensor, n_scene, 1.0, 1.0, 587.6, coating);
+            surface_R[i] = coated_reflectance(n_sensor, n_scene, 1.0, 1.0, lambda, coating);
         }
 
         // Sum pair weights (R_a * R_b) for importance sampling CDF
