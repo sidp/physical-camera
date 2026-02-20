@@ -48,6 +48,7 @@ Focus distance is controlled through Blender's standard camera Depth of Field se
 - Double Gauss 50mm f/2
 - Double Gauss 100mm f/1.7
 - Navarro Anamorphic 2x Cinema (anamorphic, aspheric)
+- Neil Front Anamorphic 2x Cinema (anamorphic, internal focusing)
 - Nikkor AI AF Fisheye 16mm f/2.8D (internal focusing)
 - Petzval 85mm f/2.4
 - Sonnar 50mm f/1.5
