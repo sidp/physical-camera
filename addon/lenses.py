@@ -101,10 +101,10 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                         f"nonzero radius"
                     )
                 coeffs = s.get("aspheric_coeffs")
-                if not isinstance(coeffs, list) or len(coeffs) != 3:
+                if not isinstance(coeffs, list) or len(coeffs) not in (3, 4):
                     raise ValueError(
                         f"{toml_path.name}: aspheric surface {i} must have "
-                        f"aspheric_coeffs as a list of 3 floats"
+                        f"aspheric_coeffs as a list of 3 or 4 floats"
                     )
             else:
                 if "aspheric_coeffs" in s or "conic" in s:

@@ -44,6 +44,7 @@ def _format_surface_assignments(
         base = i * N_EXTRA
         k = s.get("conic", 0.0)
         coeffs = s.get("aspheric_coeffs", [0.0, 0.0, 0.0])
+        a10 = coeffs[3] if len(coeffs) >= 4 else 0.0
         lines.append(
             f"        extra[{base}] = {k};  "
             f"extra[{base + 1}] = {coeffs[0]};  "
@@ -51,7 +52,7 @@ def _format_surface_assignments(
             f"extra[{base + 3}] = {coeffs[2]};"
         )
         lines.append(
-            f"        extra[{base + 4}] = 0.0;  "
+            f"        extra[{base + 4}] = {a10};  "
             f"extra[{base + 5}] = 0.0;  "
             f"extra[{base + 6}] = 0.0;  "
             f"extra[{base + 7}] = 0.0;"
@@ -76,7 +77,8 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "// extra[i*N_EXTRA + 1] = A4 (4th-order aspheric coefficient)",
         "// extra[i*N_EXTRA + 2] = A6 (6th-order aspheric coefficient)",
         "// extra[i*N_EXTRA + 3] = A8 (8th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 4..7] = reserved",
+        "// extra[i*N_EXTRA + 4] = A10 (10th-order aspheric coefficient)",
+        "// extra[i*N_EXTRA + 5..7] = reserved",
         "",
         "void load_lens_data(",
         "    int lens_type,",

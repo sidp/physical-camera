@@ -369,23 +369,25 @@ int intersect_sphere(
     return 0;
 }
 
-float aspheric_sag(float h, float c, float k, float A4, float A6, float A8) {
+float aspheric_sag(float h, float c, float k, float A4, float A6, float A8, float A10) {
     float h2 = h * h;
     float Q = max(1.0 - (1.0 + k) * c * c * h2, 1e-20);
-    float sag = c * h2 / (1.0 + sqrt(Q)) + A4 * h2 * h2 + A6 * h2 * h2 * h2 + A8 * h2 * h2 * h2 * h2;
+    float sag = c * h2 / (1.0 + sqrt(Q)) + A4 * h2 * h2 + A6 * h2 * h2 * h2
+                + A8 * h2 * h2 * h2 * h2 + A10 * h2 * h2 * h2 * h2 * h2;
     return sag;
 }
 
-float aspheric_sag_prime(float h, float c, float k, float A4, float A6, float A8) {
+float aspheric_sag_prime(float h, float c, float k, float A4, float A6, float A8, float A10) {
     float h2 = h * h;
     float Q = max(1.0 - (1.0 + k) * c * c * h2, 1e-20);
-    return c * h / sqrt(Q) + 4.0 * A4 * h * h2 + 6.0 * A6 * h * h2 * h2 + 8.0 * A8 * h * h2 * h2 * h2;
+    return c * h / sqrt(Q) + 4.0 * A4 * h * h2 + 6.0 * A6 * h * h2 * h2
+           + 8.0 * A8 * h * h2 * h2 * h2 + 10.0 * A10 * h * h2 * h2 * h2 * h2;
 }
 
 int intersect_aspheric(
     point ray_origin, vector ray_dir,
     float vertex_z, float radius,
-    float k, float A4, float A6, float A8,
+    float k, float A4, float A6, float A8, float A10,
     output point hit_point)
 {
     // Seed with spherical intersection
@@ -410,11 +412,11 @@ int intersect_aspheric(
         float py = oy + t * dy;
         float pz = oz + t * dz;
         float h = sqrt(px * px + py * py);
-        float s = aspheric_sag(h, c, k, A4, A6, A8);
+        float s = aspheric_sag(h, c, k, A4, A6, A8, A10);
         F = pz - vertex_z - s;
         if (abs(F) < 1e-8)
             break;
-        float sp = aspheric_sag_prime(h, c, k, A4, A6, A8);
+        float sp = aspheric_sag_prime(h, c, k, A4, A6, A8, A10);
         float dh_dt = (h > 1e-10) ? (px * dx + py * dy) / h : 0.0;
         float dF_dt = dz - sp * dh_dt;
         if (abs(dF_dt) < 1e-20)
@@ -442,7 +444,7 @@ int refract_at_surface(
     float blade_rotation,
     int surface_type,
     float coating,
-    float k, float A4, float A6, float A8,
+    float k, float A4, float A6, float A8, float A10,
     output point new_origin,
     output vector new_dir,
     output float transmission)
@@ -499,7 +501,7 @@ int refract_at_surface(
     point hit = point(0, 0, 0);
 
     if (surface_type == SURFACE_ASPHERIC) {
-        if (!intersect_aspheric(ray_origin, ray_dir, vertex_z, radius, k, A4, A6, A8, hit))
+        if (!intersect_aspheric(ray_origin, ray_dir, vertex_z, radius, k, A4, A6, A8, A10, hit))
             return 0;
     } else {
         float sphere_center_z = vertex_z + radius;
@@ -518,7 +520,7 @@ int refract_at_surface(
         float c = 1.0 / radius;
         float h = sqrt(hit[0] * hit[0] + hit[1] * hit[1]);
         if (h > 1e-10) {
-            float sp = aspheric_sag_prime(h, c, k, A4, A6, A8);
+            float sp = aspheric_sag_prime(h, c, k, A4, A6, A8, A10);
             N = normalize(vector(-sp * hit[0] / h, -sp * hit[1] / h, 1.0));
         } else {
             N = vector(0, 0, 1);
@@ -638,13 +640,13 @@ int trace_lens_system(
         }
 
         int base = idx * N_EXTRA;
-        float k_i = extra[base], A4_i = extra[base + 1], A6_i = extra[base + 2], A8_i = extra[base + 3];
+        float k_i = extra[base], A4_i = extra[base + 1], A6_i = extra[base + 2], A8_i = extra[base + 3], A10_i = extra[base + 4];
 
         point  new_p = point(0, 0, 0);
         vector new_d = vector(0, 0, 0);
         float surface_transmission = 1.0;
 
-        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, new_p, new_d, surface_transmission);
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, A10_i, new_p, new_d, surface_transmission);
 
         // Mirror case: a flat surface was processed but the adjacent curved
         // surface's sphere extends past it, making intersection unreachable.
@@ -656,7 +658,7 @@ int trace_lens_system(
             surfaces_passed = saved_surfaces;
             saved_idx = -1;
 
-            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, new_p, new_d, surface_transmission);
+            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, A10_i, new_p, new_d, surface_transmission);
             if (result != 1) {
                 if (result == 0) failure_type = 1;
                 else if (result == -1) failure_type = 2;
