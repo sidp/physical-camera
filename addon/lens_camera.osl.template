@@ -1369,16 +1369,10 @@ shader lens_camera(
             float cos_theta = dot(normalize(ghost_initial_dir), axis);
             float weight = cos_theta * cos_theta * cos_theta * cos_theta;
 
-            // Wider ghost disk means each hit represents more solid angle.
-            // Scale by area ratio so the Monte Carlo estimator stays unbiased.
-            float ghost_area = ghost_semi_ap * ghost_semi_ap;
-            float direct_area = field_semi_ap_x * field_semi_ap_y;
-            float area_ratio = (direct_area > 1e-10) ? ghost_area / direct_area : 1.0;
-
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
             float frac = ghosts_only ? 1.0 : ghost_fraction;
             // 1/pdf = ghost_total_weight / ghost_pair_weight replaces num_ghost_pairs
-            float w = weight * (ghost_T / onaxis_T) * area_ratio
+            float w = weight * (ghost_T / onaxis_T)
                     * (ghost_total_weight / ghost_pair_weight) / frac * ghost_intensity;
 
             position = point(ghost_exit[0] * 0.001,
