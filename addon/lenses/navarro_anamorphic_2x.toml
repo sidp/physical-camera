@@ -256,3 +256,14 @@ aperture = 30.9171
 abbe_v = 0.0
 conic = 0.0
 aspheric_coeffs = [8.75413e-7, -1.46573e-9, 2.5569e-12, -4.86557e-15]
+
+[focus]
+close_distance = 1000.0
+
+[[focus.variable]]
+surface = 3
+thickness_close = 1.73
+
+[[focus.variable]]
+surface = 21
+thickness_close = 6.70
