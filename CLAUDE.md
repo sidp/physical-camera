@@ -6,6 +6,15 @@ Physical Camera — a Blender extension that replaces Blender's built-in camera 
 
 Requires Blender 4.5+ with Cycles and OSL enabled.
 
+## Goals
+
+The primary goal is to accurately and realistically simulate real-world lenses. Accuracy and realism take priority in design decisions.
+
+Performance and code architecture are secondary but important constraints:
+
+- **Performance** — Rendering is expected to be slower than Blender's built-in camera due to the physically-based lens model. Features that add significant per-ray cost should be toggleable so users can choose the accuracy/speed tradeoff. Before implementing an expensive feature, consider whether approximations or importance sampling can bring the cost down
+- **Complexity** — Features that can't be cleanly integrated into the existing architecture should prompt a refactor before implementation, not after. Avoid bolting complex behavior onto code that wasn't designed for it — restructure first so the new feature fits naturally
+
 ## Architecture
 
 There are two main parts:
