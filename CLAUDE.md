@@ -33,6 +33,7 @@ There are two main parts:
 5. Regenerate lens diagram PNGs: `uv run scripts/build_diagrams.py`
 6. Optionally add a `[focus]` section for variable element spacing (see below). Lenses without this section use unit focusing (sensor-plane movement only)
 7. For anamorphic lenses, add `squeeze = 2.0` (or the appropriate factor) to the `[lens]` section. The shader scales sensor X coordinates by this factor to automatically desqueeze the output. Spherical lenses omit this field (defaults to 1.0)
+8. Update the "Included Lenses" list in `README.md`
 
 ### Variable Element Spacing
 
