@@ -506,23 +506,20 @@ int intersect_aspheric(
     return 1;
 }
 
-// Returns: 1 = success, 0 = intersection miss, -1 = aperture clip, -2 = TIR
-int refract_at_surface(
+// Geometry helper: find intersection point and surface normal for any surface type.
+// Returns: 1=hit, 0=miss, -1=clipped
+int find_surface_intersection(
     point ray_origin,
     vector ray_dir,
     float vertex_z,
     float radius,
     float semi_aperture,
-    float n1,
-    float n2,
+    int surface_type,
     int num_blades,
     float blade_rotation,
-    int surface_type,
-    float coating,
     float k, float A4, float A6, float A8, float A10,
-    output point new_origin,
-    output vector new_dir,
-    output float transmission)
+    output point hit_point,
+    output vector surface_normal)
 {
     if (!is_curved_surface(surface_type)) {
         float dz = ray_dir[2];
@@ -531,45 +528,24 @@ int refract_at_surface(
         float t = (vertex_z - ray_origin[2]) / dz;
         if (t < 1e-6)
             return 0;
-        new_origin = ray_origin + t * ray_dir;
+        hit_point = ray_origin + t * ray_dir;
 
         if (surface_type == SURFACE_STOP) {
-            // Aperture stop: shaped clipping, no refraction
             if (num_blades >= 3) {
-                if (!point_in_ngon(new_origin[0], new_origin[1], semi_aperture, num_blades, blade_rotation))
+                if (!point_in_ngon(hit_point[0], hit_point[1], semi_aperture, num_blades, blade_rotation))
                     return -1;
             } else {
-                float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
+                float r = sqrt(hit_point[0] * hit_point[0] + hit_point[1] * hit_point[1]);
                 if (r > semi_aperture)
                     return -1;
             }
-            new_dir = ray_dir;
-            transmission = 1.0;
-            return 1;
+        } else {
+            float r = sqrt(hit_point[0] * hit_point[0] + hit_point[1] * hit_point[1]);
+            if (r > semi_aperture)
+                return -1;
         }
 
-        // Flat refractive surface: circular clip + Snell's law
-        float r = sqrt(new_origin[0] * new_origin[0] + new_origin[1] * new_origin[1]);
-        if (r > semi_aperture)
-            return -1;
-
-        if (n1 == n2) {
-            new_dir = ray_dir;
-            transmission = 1.0;
-            return 1;
-        }
-
-        vector N = vector(0, 0, -1);
-        vector I = normalize(ray_dir);
-        if (dot(I, N) > 0.0)
-            N = -N;
-        float cos_i = abs(dot(I, N));
-        vector refracted = refract(I, N, n1 / n2);
-        if (dot(refracted, refracted) < 1e-10)
-            return -2;
-        float cos_t = abs(dot(refracted, N));
-        transmission = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
-        new_dir = refracted;
+        surface_normal = vector(0, 0, -1);
         return 1;
     }
 
@@ -588,12 +564,10 @@ int refract_at_surface(
             return 0;
     }
 
-    // Aperture clip
     float r = sqrt(hit[0] * hit[0] + hit[1] * hit[1]);
     if (r > semi_aperture)
         return -1;
 
-    // Surface normal
     vector N;
     if (surface_type == SURFACE_ASPHERIC) {
         float c = 1.0 / radius;
@@ -615,24 +589,111 @@ int refract_at_surface(
         N = normalize(hit - point(0, 0, sphere_center_z));
     }
 
-    // Flip normal to face the incoming ray
+    hit_point = hit;
+    surface_normal = N;
+    return 1;
+}
+
+// Returns: 1 = success, 0 = intersection miss, -1 = aperture clip, -2 = TIR
+int refract_at_surface(
+    point ray_origin,
+    vector ray_dir,
+    float vertex_z,
+    float radius,
+    float semi_aperture,
+    float n1,
+    float n2,
+    int num_blades,
+    float blade_rotation,
+    int surface_type,
+    float coating,
+    float k, float A4, float A6, float A8, float A10,
+    output point new_origin,
+    output vector new_dir,
+    output float transmission)
+{
+    point hit = point(0, 0, 0);
+    vector N = vector(0, 0, 0);
+    int result = find_surface_intersection(
+        ray_origin, ray_dir, vertex_z, radius, semi_aperture,
+        surface_type, num_blades, blade_rotation,
+        k, A4, A6, A8, A10, hit, N);
+
+    if (result != 1)
+        return result;
+
+    new_origin = hit;
+
+    if (surface_type == SURFACE_STOP) {
+        new_dir = ray_dir;
+        transmission = 1.0;
+        return 1;
+    }
+
+    if (n1 == n2) {
+        new_dir = ray_dir;
+        transmission = 1.0;
+        return 1;
+    }
+
     vector I = normalize(ray_dir);
     if (dot(I, N) > 0.0)
         N = -N;
 
     float cos_i = abs(dot(I, N));
-    float eta = n1 / n2;
-    vector refracted = refract(I, N, eta);
-
-    // TIR check: refract() returns zero vector on total internal reflection
+    vector refracted = refract(I, N, n1 / n2);
     if (dot(refracted, refracted) < 1e-10)
         return -2;
 
     float cos_t = abs(dot(refracted, N));
-    transmission = (n1 == n2) ? 1.0 : fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
-
-    new_origin = hit;
+    transmission = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
     new_dir = refracted;
+    return 1;
+}
+
+// Returns: 1 = success, 0 = miss, -1 = clipped
+int reflect_at_surface(
+    point ray_origin,
+    vector ray_dir,
+    float vertex_z,
+    float radius,
+    float semi_aperture,
+    float n1,
+    float n2,
+    int surface_type,
+    float coating,
+    float k, float A4, float A6, float A8, float A10,
+    output point new_origin,
+    output vector new_dir,
+    output float reflectance)
+{
+    point hit = point(0, 0, 0);
+    vector N = vector(0, 0, 0);
+    int result = find_surface_intersection(
+        ray_origin, ray_dir, vertex_z, radius, semi_aperture,
+        surface_type, 0, 0.0,
+        k, A4, A6, A8, A10, hit, N);
+
+    if (result != 1)
+        return result;
+
+    vector I = normalize(ray_dir);
+    if (dot(I, N) > 0.0)
+        N = -N;
+
+    float cos_i = abs(dot(I, N));
+    new_origin = hit;
+    new_dir = reflect(I, N);
+
+    if (n1 == n2) {
+        reflectance = 0.0;
+        return 1;
+    }
+
+    float sin_t2 = (n1 * n1) / (n2 * n2) * (1.0 - cos_i * cos_i);
+    float cos_t = (sin_t2 < 1.0) ? sqrt(1.0 - sin_t2) : 0.0;
+    float T = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
+    reflectance = 1.0 - T;
     return 1;
 }
 
@@ -841,6 +902,151 @@ int trace_lens_system(
     return 1;
 }
 
+// Trace a contiguous range of surfaces [start_idx..end_idx] in the given direction.
+// Refracts at each surface except reflect_at_idx where it reflects instead.
+int trace_surface_range(
+    int start_idx, int end_idx, int step, int reflect_at_idx,
+    point p_in, vector d_in,
+    float aperture_scale,
+    int num_surfaces,
+    float radii[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    float apertures[MAX_SURFACES],
+    float abbe_v[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
+    float extra[MAX_EXTRA],
+    float vertex_z[MAX_SURFACES],
+    float lambda_nm,
+    int num_blades,
+    float blade_rotation,
+    float coating,
+    output point p_out,
+    output vector d_out,
+    output float total_transmission)
+{
+    p_out = p_in;
+    d_out = d_in;
+    total_transmission = 1.0;
+
+    for (int idx = start_idx; ; idx += step) {
+        float semi_ap = apertures[idx] * 0.5;
+        if (surface_types[idx] == SURFACE_STOP)
+            semi_ap *= aperture_scale;
+
+        float n1, n2;
+        if (step < 0) {
+            n1 = cauchy_ior(iors[idx], abbe_v[idx], lambda_nm);
+            n2 = (idx > 0) ? cauchy_ior(iors[idx - 1], abbe_v[idx - 1], lambda_nm) : 1.0;
+        } else {
+            n1 = (idx > 0) ? cauchy_ior(iors[idx - 1], abbe_v[idx - 1], lambda_nm) : 1.0;
+            n2 = cauchy_ior(iors[idx], abbe_v[idx], lambda_nm);
+        }
+        if (surface_types[idx] == SURFACE_STOP) {
+            n1 = 1.0;
+            n2 = 1.0;
+        }
+
+        int base = idx * N_EXTRA;
+        float k_i = extra[base], A4_i = extra[base + 1], A6_i = extra[base + 2];
+        float A8_i = extra[base + 3], A10_i = extra[base + 4];
+
+        point new_p = point(0, 0, 0);
+        vector new_d = vector(0, 0, 0);
+
+        if (idx == reflect_at_idx) {
+            float reflectance = 0.0;
+            int result = reflect_at_surface(
+                p_out, d_out, vertex_z[idx], radii[idx], semi_ap,
+                n1, n2, surface_types[idx], coating,
+                k_i, A4_i, A6_i, A8_i, A10_i,
+                new_p, new_d, reflectance);
+            if (result != 1)
+                return 0;
+            total_transmission *= reflectance;
+        } else {
+            float trans = 1.0;
+            int result = refract_at_surface(
+                p_out, d_out, vertex_z[idx], radii[idx], semi_ap,
+                n1, n2, num_blades, blade_rotation, surface_types[idx], coating,
+                k_i, A4_i, A6_i, A8_i, A10_i,
+                new_p, new_d, trans);
+            if (result != 1)
+                return 0;
+            total_transmission *= trans;
+        }
+
+        p_out = new_p;
+        d_out = new_d;
+
+        if (idx == end_idx)
+            break;
+    }
+
+    return 1;
+}
+
+// Trace a ghost path with two reflections: bounce_a (front-ward) and bounce_b (rear-ward).
+// bounce_a < bounce_b. The ray refracts normally except at the two bounce surfaces.
+int trace_ghost_path(
+    int bounce_a, int bounce_b,
+    point p_in, vector d_in,
+    float aperture_scale,
+    int num_surfaces,
+    float radii[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    float apertures[MAX_SURFACES],
+    float abbe_v[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
+    float extra[MAX_EXTRA],
+    float vertex_z[MAX_SURFACES],
+    float lambda_nm,
+    int num_blades,
+    float blade_rotation,
+    float coating,
+    output point p_out,
+    output vector d_out,
+    output float total_transmission)
+{
+    total_transmission = 1.0;
+    p_out = p_in;
+    d_out = d_in;
+    float phase_T = 1.0;
+
+    // Phase 1: sensor → front, reflect at bounce_a
+    if (!trace_surface_range(
+            num_surfaces - 1, bounce_a, -1, bounce_a,
+            p_out, d_out, aperture_scale, num_surfaces,
+            radii, iors, apertures, abbe_v, surface_types, extra, vertex_z,
+            lambda_nm, num_blades, blade_rotation, coating,
+            p_out, d_out, phase_T))
+        return 0;
+    total_transmission *= phase_T;
+
+    // Phase 2: front → rear, reflect at bounce_b
+    if (!trace_surface_range(
+            bounce_a + 1, bounce_b, 1, bounce_b,
+            p_out, d_out, aperture_scale, num_surfaces,
+            radii, iors, apertures, abbe_v, surface_types, extra, vertex_z,
+            lambda_nm, num_blades, blade_rotation, coating,
+            p_out, d_out, phase_T))
+        return 0;
+    total_transmission *= phase_T;
+
+    // Phase 3: rear → front, normal refraction to exit
+    if (bounce_b > 0) {
+        if (!trace_surface_range(
+                bounce_b - 1, 0, -1, -1,
+                p_out, d_out, aperture_scale, num_surfaces,
+                radii, iors, apertures, abbe_v, surface_types, extra, vertex_z,
+                lambda_nm, num_blades, blade_rotation, coating,
+                p_out, d_out, phase_T))
+            return 0;
+        total_transmission *= phase_T;
+    }
+
+    return 1;
+}
+
 shader lens_camera(
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open." ]],
@@ -852,8 +1058,14 @@ shader lens_camera(
         [[ string description = "Aperture blade rotation in degrees." ]],
     int chromatic_aberration = 1
         [[ string description = "Enable chromatic aberration (spectral dispersion)." ]],
+    int lens_ghosts = 0
+        [[ string description = "Enable ghost/flare simulation (double-bounce reflections)." ]],
+    float ghost_intensity = 1.0
+        [[ string description = "Brightness multiplier for ghost images." ]],
+    float ghost_fraction = 0.1
+        [[ string description = "Fraction of samples allocated to ghost paths when enabled." ]],
     float debug_mode = 0.0
-        [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction" ]],
+        [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction, 4=ghosts only" ]],
     output point position = 0,
     output vector direction = 0,
     output color throughput = 1)
@@ -934,6 +1146,11 @@ shader lens_camera(
         total_length += thicknesses[i];
     float sensor_distance = compute_sensor_distance(
         num_surfaces, radii, thicknesses, iors, surface_types, total_length, focus_mm);
+
+    float vertex_z[MAX_SURFACES];
+    vertex_z[0] = -total_length;
+    for (int i = 1; i < num_surfaces; i++)
+        vertex_z[i] = vertex_z[i - 1] + thicknesses[i - 1];
 
     // camera_shader_random_sample() provides two uniform values in x/y.
     // x = aperture angle (sector + barycentric u1), y = barycentric u2; the
@@ -1057,7 +1274,108 @@ shader lens_camera(
     // Initial ray: sensor toward the stop
     vector initial_dir = normalize(aperture_point - sensor_point);
 
-    // Trace through the lens system
+    // Ghost path handling
+    int trace_ghost = 0;
+    int num_ghost_pairs = 0;
+    int ghost_a = -1, ghost_b = -1;
+
+    if (lens_ghosts) {
+        for (int a = 0; a < num_surfaces; a++) {
+            if (surface_types[a] == SURFACE_STOP) continue;
+            float na1 = iors[a];
+            float na2 = (a > 0) ? iors[a - 1] : 1.0;
+            if (na1 == na2) continue;
+            for (int b = a + 1; b < num_surfaces; b++) {
+                if (surface_types[b] == SURFACE_STOP) continue;
+                float nb1 = iors[b];
+                float nb2 = (b > 0) ? iors[b - 1] : 1.0;
+                if (nb1 == nb2) continue;
+                num_ghost_pairs++;
+            }
+        }
+
+        if (num_ghost_pairs > 0) {
+            float ghost_hash = sin(rnd[0] * 45.233 + rnd[1] * 97.113) * 21453.1211;
+            ghost_hash = ghost_hash - floor(ghost_hash);
+            int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
+
+            if (ghosts_only || ghost_hash < ghost_fraction) {
+                trace_ghost = 1;
+
+                float pair_hash = sin(rnd[0] * 31.7 + rnd[1] * 53.9) * 17431.7;
+                pair_hash = pair_hash - floor(pair_hash);
+                int target = int(floor(pair_hash * float(num_ghost_pairs)));
+                if (target >= num_ghost_pairs) target = num_ghost_pairs - 1;
+
+                int count = 0;
+                for (int a = 0; a < num_surfaces && ghost_a < 0; a++) {
+                    if (surface_types[a] == SURFACE_STOP) continue;
+                    float na1 = iors[a];
+                    float na2 = (a > 0) ? iors[a - 1] : 1.0;
+                    if (na1 == na2) continue;
+                    for (int b = a + 1; b < num_surfaces && ghost_a < 0; b++) {
+                        if (surface_types[b] == SURFACE_STOP) continue;
+                        float nb1 = iors[b];
+                        float nb2 = (b > 0) ? iors[b - 1] : 1.0;
+                        if (nb1 == nb2) continue;
+                        if (count == target) {
+                            ghost_a = a;
+                            ghost_b = b;
+                        }
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Debug mode 4: ghosts only — kill direct rays
+    if (debug_mode >= 3.5 && debug_mode < 4.5 && !trace_ghost) {
+        throughput = 0.0;
+        return;
+    }
+
+    if (trace_ghost) {
+        point ghost_exit = point(0, 0, 0);
+        vector ghost_dir = vector(0, 0, 0);
+        float ghost_T = 0.0;
+
+        int ghost_ok = trace_ghost_path(
+            ghost_a, ghost_b, sensor_point, initial_dir,
+            aperture_scale, num_surfaces,
+            radii, iors, apertures, abbe_v, surface_types, extra, vertex_z,
+            lambda, aperture_blades, blade_rot_rad, coating,
+            ghost_exit, ghost_dir, ghost_T);
+
+        if (ghost_ok) {
+            vector axis = vector(0, 0, -1);
+            float cos_theta = dot(normalize(initial_dir), axis);
+            float weight = cos_theta * cos_theta * cos_theta * cos_theta;
+
+            int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
+            float frac = ghosts_only ? 1.0 : ghost_fraction;
+            float w = weight * (ghost_T / onaxis_T)
+                    * float(num_ghost_pairs) / frac * ghost_intensity;
+
+            position = point(ghost_exit[0] * 0.001,
+                             ghost_exit[1] * 0.001,
+                             -ghost_exit[2] * 0.001);
+            direction = normalize(vector(ghost_dir[0], ghost_dir[1], -ghost_dir[2]));
+
+            if (chromatic_aberration) {
+                color spectral_norm = color(1.7050, 2.5996, 2.7576);
+                color rgb_w = wavelength_to_rgb(lambda) * spectral_norm;
+                throughput = color(w * rgb_w[0], w * rgb_w[1], w * rgb_w[2]);
+            } else {
+                throughput = color(w, w, w);
+            }
+        } else {
+            throughput = 0.0;
+        }
+        return;
+    }
+
+    // Direct path: trace through the lens system
     point  exit_origin = point(0, 0, 0);
     vector exit_dir = vector(0, 0, 0);
     int surfaces_passed = 0;
@@ -1106,16 +1424,16 @@ shader lens_camera(
         return;
     }
 
-    // Normal mode: output in camera space (Blender applies camera transform).
-    // Lens space has -z toward scene; Blender camera space has +z toward scene.
-    // Negate z to convert.
     if (ok) {
-        // Throughput weight: cos^4(theta) models natural radiometric falloff.
         vector axis = vector(0, 0, -1);
         float cos_theta = dot(normalize(initial_dir), axis);
         float weight = cos_theta * cos_theta * cos_theta * cos_theta;
 
         float w = weight * (total_transmission / onaxis_T);
+
+        // Compensate for fewer direct samples when ghosts are active
+        if (lens_ghosts && num_ghost_pairs > 0)
+            w /= (1.0 - ghost_fraction);
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,

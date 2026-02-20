@@ -110,12 +110,24 @@ abbe_v = 26.5
 3. `compute_sensor_distance()` — Y-axis ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance. Cylindrical_x surfaces are skipped (no Y power); cylindrical_y surfaces contribute
 4. `compute_exit_pupil()` — Dual X/Y ABCD matrices for rear subsystem to find exit pupil position/magnification per axis. Derives stop index from `surface_types[]`
 5. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures. Derives stop index from `surface_types[]`
-6. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch
-7. `refract_at_surface()` — dispatches on `surface_type`: spherical (ray-sphere intersection + Snell's law), aspheric (Newton-Raphson intersection + analytical normal + Snell's law), cylindrical (ray-cylinder intersection + axis-aligned normal + Snell's law), flat (plane intersection + Snell's law), or stop (shaped aperture clip, no refraction)
-8. `check_aperture_at_plane()` — projects a ray to a z-plane and checks circular or n-gon aperture clip
-9. `refract_at_flat_plane()` — Snell's law at a flat surface with Fresnel transmittance
+6. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch. Includes sphere-overlap retry logic for thin flat surfaces adjacent to curved ones
+7. `find_surface_intersection()` — geometry-only helper: finds intersection point and surface normal for any surface type (flat, stop, spherical, aspheric, cylindrical). Returns 1=hit, 0=miss, -1=clipped
+8. `refract_at_surface()` — calls `find_surface_intersection()`, then applies Snell's law + Fresnel transmittance. Stops pass through without refraction
+9. `reflect_at_surface()` — calls `find_surface_intersection()`, then applies `reflect()` + Fresnel reflectance. Used for ghost bounces (never called on stops)
+10. `trace_surface_range()` — traces a contiguous range of surfaces in either direction (step=±1). Refracts at each surface except an optional reflect_at_idx where it reflects. No sphere-overlap retry logic
+11. `trace_ghost_path()` — composes three `trace_surface_range()` calls for a double-bounce ghost path: (a) rear→bounce_a with reflect, (b) bounce_a+1→bounce_b with reflect, (c) bounce_b-1→front with refract
+12. `check_aperture_at_plane()` — projects a ray to a z-plane and checks circular or n-gon aperture clip
+13. `refract_at_flat_plane()` — Snell's law at a flat surface with Fresnel transmittance
 
 Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel loss against on-axis transmission. When chromatic aberration is enabled, wavelength is sampled uniformly over 400–700nm with golden-ratio decorrelation for the aperture radius sample.
+
+### Ghost/Flare Simulation
+
+When `lens_ghosts` is enabled, a fraction (`ghost_fraction`, default 0.1) of samples trace ghost paths instead of direct paths. Ghost pairs are enumerated from all surfaces with a Fresnel interface (non-stop surfaces where IOR changes), excluding same-IOR boundaries. A random pair is selected per sample.
+
+- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * num_pairs / ghost_fraction * ghost_intensity`
+- Direct throughput (when ghosts active): `cos^4 * (T / onaxis_T) / (1 - ghost_fraction)`
+- Debug mode 4 ("Ghosts Only"): all samples trace ghost paths, direct rays suppressed
 
 ## Coordinate System
 

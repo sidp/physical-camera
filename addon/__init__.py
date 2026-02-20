@@ -62,8 +62,10 @@ def sync_to_cycles(cam):
     from math import degrees
     custom["blade_rotation"] = degrees(props.blade_rotation)
     custom["chromatic_aberration"] = 1 if props.chromatic_aberration else 0
+    custom["lens_ghosts"] = 1 if props.lens_ghosts else 0
+    custom["ghost_intensity"] = props.ghost_intensity
 
-    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0}
+    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0}
     custom["debug_mode"] = debug_map[props.debug_mode]
 
     if lens_index < len(_lens_registry):
@@ -133,6 +135,21 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
         default=True,
         update=_on_property_change,
     )
+    lens_ghosts: BoolProperty(
+        name="Lens Ghosts",
+        default=False,
+        update=_on_property_change,
+    )
+    ghost_intensity: FloatProperty(
+        name="Ghost Intensity",
+        description="Brightness multiplier for ghost images",
+        min=0.0,
+        soft_max=10.0,
+        max=100.0,
+        default=1.0,
+        precision=2,
+        update=_on_property_change,
+    )
     debug_mode: EnumProperty(
         name="Debug Mode",
         items=[
@@ -140,6 +157,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
             ("PINHOLE", "Pinhole", "Pinhole camera (no lens)"),
             ("DIAGNOSTIC", "Diagnostic", "Failure cause visualization"),
             ("EXIT_DIR", "Exit Direction", "Exit ray direction as RGB"),
+            ("GHOSTS_ONLY", "Ghosts Only", "Show only ghost reflections"),
         ],
         default="NORMAL",
         update=_on_property_change,
@@ -242,6 +260,9 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
 
         layout.separator()
         layout.prop(props, "chromatic_aberration")
+        layout.prop(props, "lens_ghosts")
+        if props.lens_ghosts:
+            layout.prop(props, "ghost_intensity")
         layout.prop(props, "debug_mode")
 
 
