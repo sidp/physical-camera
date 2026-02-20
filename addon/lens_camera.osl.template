@@ -1342,12 +1342,23 @@ shader lens_camera(
     }
 
     if (trace_ghost) {
+        // Ghost rays don't pass through the stop, so the field exit pupil
+        // restriction doesn't apply. Use the unrestricted circular exit pupil
+        // centered on-axis. For anamorphic lenses this widens the X-axis
+        // sampling, capturing vertical streaks from cylindrical reflections.
+        float ghost_semi_ap = aim_semi_ap;
+        float ghost_r = sqrt(r_param) * ghost_semi_ap;
+        float ghost_angle = rnd[0] * 2.0 * M_PI;
+        point ghost_aperture = point(ghost_r * cos(ghost_angle),
+                                     ghost_r * sin(ghost_angle), aim_z);
+        vector ghost_initial_dir = normalize(ghost_aperture - sensor_point);
+
         point ghost_exit = point(0, 0, 0);
         vector ghost_dir = vector(0, 0, 0);
         float ghost_T = 0.0;
 
         int ghost_ok = trace_ghost_path(
-            ghost_a, ghost_b, sensor_point, initial_dir,
+            ghost_a, ghost_b, sensor_point, ghost_initial_dir,
             aperture_scale, num_surfaces,
             radii, iors, apertures, abbe_v, surface_types, extra, vertex_z,
             lambda, aperture_blades, blade_rot_rad, coating,
@@ -1355,13 +1366,19 @@ shader lens_camera(
 
         if (ghost_ok) {
             vector axis = vector(0, 0, -1);
-            float cos_theta = dot(normalize(initial_dir), axis);
+            float cos_theta = dot(normalize(ghost_initial_dir), axis);
             float weight = cos_theta * cos_theta * cos_theta * cos_theta;
+
+            // Wider ghost disk means each hit represents more solid angle.
+            // Scale by area ratio so the Monte Carlo estimator stays unbiased.
+            float ghost_area = ghost_semi_ap * ghost_semi_ap;
+            float direct_area = field_semi_ap_x * field_semi_ap_y;
+            float area_ratio = (direct_area > 1e-10) ? ghost_area / direct_area : 1.0;
 
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
             float frac = ghosts_only ? 1.0 : ghost_fraction;
             // 1/pdf = ghost_total_weight / ghost_pair_weight replaces num_ghost_pairs
-            float w = weight * (ghost_T / onaxis_T)
+            float w = weight * (ghost_T / onaxis_T) * area_ratio
                     * (ghost_total_weight / ghost_pair_weight) / frac * ghost_intensity;
 
             position = point(ghost_exit[0] * 0.001,
