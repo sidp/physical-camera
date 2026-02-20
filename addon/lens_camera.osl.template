@@ -693,7 +693,8 @@ int reflect_at_surface(
     float sin_t2 = (n1 * n1) / (n2 * n2) * (1.0 - cos_i * cos_i);
     float cos_t = (sin_t2 < 1.0) ? sqrt(1.0 - sin_t2) : 0.0;
     float T = fresnel_transmittance(n1, n2, cos_i, cos_t, coating);
-    reflectance = 1.0 - T;
+    // Cap reflectance to suppress near-TIR fireflies in ghost paths
+    reflectance = min(1.0 - T, 0.25);
     return 1;
 }
 
@@ -1274,27 +1275,37 @@ shader lens_camera(
     // Initial ray: sensor toward the stop
     vector initial_dir = normalize(aperture_point - sensor_point);
 
-    // Ghost path handling
+    // Ghost path handling: importance-sample pairs by normal-incidence R²
     int trace_ghost = 0;
     int num_ghost_pairs = 0;
     int ghost_a = -1, ghost_b = -1;
+    float ghost_pair_weight = 0.0;
+    float ghost_total_weight = 0.0;
 
     if (lens_ghosts) {
+        // Normal-incidence Fresnel reflectance per surface (with coating)
+        float surface_R[MAX_SURFACES];
+        for (int i = 0; i < num_surfaces; i++) {
+            surface_R[i] = 0.0;
+            if (surface_types[i] == SURFACE_STOP) continue;
+            float n_sensor = iors[i];
+            float n_scene = (i > 0) ? iors[i - 1] : 1.0;
+            if (n_sensor == n_scene) continue;
+            float r = (n_sensor - n_scene) / (n_sensor + n_scene);
+            surface_R[i] = r * r * (1.0 - coating_reduction(n_sensor, n_scene, coating));
+        }
+
+        // Sum pair weights (R_a * R_b) for importance sampling CDF
         for (int a = 0; a < num_surfaces; a++) {
-            if (surface_types[a] == SURFACE_STOP) continue;
-            float na1 = iors[a];
-            float na2 = (a > 0) ? iors[a - 1] : 1.0;
-            if (na1 == na2) continue;
+            if (surface_R[a] < 1e-10) continue;
             for (int b = a + 1; b < num_surfaces; b++) {
-                if (surface_types[b] == SURFACE_STOP) continue;
-                float nb1 = iors[b];
-                float nb2 = (b > 0) ? iors[b - 1] : 1.0;
-                if (nb1 == nb2) continue;
+                if (surface_R[b] < 1e-10) continue;
+                ghost_total_weight += surface_R[a] * surface_R[b];
                 num_ghost_pairs++;
             }
         }
 
-        if (num_ghost_pairs > 0) {
+        if (num_ghost_pairs > 0 && ghost_total_weight > 0.0) {
             float ghost_hash = sin(rnd[0] * 45.233 + rnd[1] * 97.113) * 21453.1211;
             ghost_hash = ghost_hash - floor(ghost_hash);
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
@@ -1302,27 +1313,22 @@ shader lens_camera(
             if (ghosts_only || ghost_hash < ghost_fraction) {
                 trace_ghost = 1;
 
+                // Select pair with probability proportional to R_a * R_b
                 float pair_hash = sin(rnd[0] * 31.7 + rnd[1] * 53.9) * 17431.7;
                 pair_hash = pair_hash - floor(pair_hash);
-                int target = int(floor(pair_hash * float(num_ghost_pairs)));
-                if (target >= num_ghost_pairs) target = num_ghost_pairs - 1;
+                float target_w = pair_hash * ghost_total_weight;
+                float cumulative = 0.0;
 
-                int count = 0;
                 for (int a = 0; a < num_surfaces && ghost_a < 0; a++) {
-                    if (surface_types[a] == SURFACE_STOP) continue;
-                    float na1 = iors[a];
-                    float na2 = (a > 0) ? iors[a - 1] : 1.0;
-                    if (na1 == na2) continue;
+                    if (surface_R[a] < 1e-10) continue;
                     for (int b = a + 1; b < num_surfaces && ghost_a < 0; b++) {
-                        if (surface_types[b] == SURFACE_STOP) continue;
-                        float nb1 = iors[b];
-                        float nb2 = (b > 0) ? iors[b - 1] : 1.0;
-                        if (nb1 == nb2) continue;
-                        if (count == target) {
+                        if (surface_R[b] < 1e-10) continue;
+                        cumulative += surface_R[a] * surface_R[b];
+                        if (cumulative >= target_w) {
                             ghost_a = a;
                             ghost_b = b;
+                            ghost_pair_weight = surface_R[a] * surface_R[b];
                         }
-                        count++;
                     }
                 }
             }
@@ -1354,8 +1360,9 @@ shader lens_camera(
 
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
             float frac = ghosts_only ? 1.0 : ghost_fraction;
+            // 1/pdf = ghost_total_weight / ghost_pair_weight replaces num_ghost_pairs
             float w = weight * (ghost_T / onaxis_T)
-                    * float(num_ghost_pairs) / frac * ghost_intensity;
+                    * (ghost_total_weight / ghost_pair_weight) / frac * ghost_intensity;
 
             position = point(ghost_exit[0] * 0.001,
                              ghost_exit[1] * 0.001,
