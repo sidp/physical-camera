@@ -1342,11 +1342,24 @@ shader lens_camera(
     }
 
     if (trace_ghost) {
-        // Ghost rays don't pass through the stop, so the field exit pupil
-        // restriction doesn't apply. Use the unrestricted circular exit pupil
-        // centered on-axis. For anamorphic lenses this widens the X-axis
-        // sampling, capturing vertical streaks from cylindrical reflections.
+        // Pair-specific ghost aiming: project apertures of all surfaces in
+        // the phase 1 path (rear element down to first bounce) onto the aim
+        // plane. The tightest constraint sets the ghost sampling disk.
+        // Circular sampling (not elliptical) allows anamorphic cylindrical
+        // reflections to form vertical streaks.
         float ghost_semi_ap = aim_semi_ap;
+        float dist_to_aim = abs(sensor_z - aim_z);
+        for (int i = num_surfaces - 1; i >= ghost_a; i--) {
+            float surf_semi_ap = apertures[i] * 0.5;
+            if (surface_types[i] == SURFACE_STOP)
+                surf_semi_ap *= aperture_scale;
+            float dist_surf = abs(sensor_z - vertex_z[i]);
+            if (dist_surf > 1e-6) {
+                float projected = surf_semi_ap * dist_to_aim / dist_surf;
+                ghost_semi_ap = min(ghost_semi_ap, projected);
+            }
+        }
+        ghost_semi_ap *= 1.1;
         float ghost_r = sqrt(r_param) * ghost_semi_ap;
         float ghost_angle = rnd[0] * 2.0 * M_PI;
         point ghost_aperture = point(ghost_r * cos(ghost_angle),
