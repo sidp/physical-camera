@@ -94,7 +94,8 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output float thicknesses_close[MAX_SURFACES],",
         "    output float focus_close_distance,",
         "    output int num_surfaces,",
-        "    output float coating)",
+        "    output float coating,",
+        "    output float squeeze)",
         "{",
     ]
 
@@ -107,6 +108,7 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
         lines.append(f"        coating = {coating_val};")
+        lines.append(f"        squeeze = {float(lens['squeeze'])};")
         lines.append(f"        focus_close_distance = {close_dist};")
         lines.append(_format_surface_assignments(
             lens["surfaces"], lens["surface_types"], focus
@@ -121,6 +123,7 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
     lines.append(f"        coating = {default_coating};")
+    lines.append(f"        squeeze = {float(default['squeeze'])};")
     lines.append(f"        focus_close_distance = {default_close_dist};")
     lines.append(_format_surface_assignments(
         default["surfaces"], default["surface_types"], default_focus

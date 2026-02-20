@@ -4,6 +4,7 @@ patent = "US Patent 9,341,827 B2 (Neil, 2016)"
 focal_length = 42.47
 max_fstop = 2.4
 coating = "multi"
+squeeze = 2.0
 
 # Negative spherical focus group
 

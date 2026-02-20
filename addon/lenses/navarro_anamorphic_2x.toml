@@ -4,6 +4,7 @@ patent = "US Patent 9,063,321 B2 (Navarro, 2015)"
 focal_length = 129.0
 max_fstop = 3.0
 coating = "multi"
+squeeze = 2.0
 
 # Front spherical group
 

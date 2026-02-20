@@ -898,9 +898,13 @@ shader lens_camera(
     float focus_close_distance = 0.0;
     int num_surfaces = 0;
     float coating = 0.0;
+    float squeeze = 1.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
                    surface_types, extra, thicknesses_close, focus_close_distance,
-                   num_surfaces, coating);
+                   num_surfaces, coating, squeeze);
+
+    // Anamorphic desqueeze: narrow sensor X sampling so the lens squeeze produces correct proportions
+    sensor_x /= squeeze;
 
     int stop_index = 0;
     for (int i = 0; i < num_surfaces; i++) {

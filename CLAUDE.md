@@ -19,9 +19,9 @@ There are two main parts:
 ### Blender Addon (`addon/`)
 - `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `codegen.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
 - `lenses.py` — Reads TOML lens files from `addon/lenses/` into dicts (no bpy dependency, shared by the build script). Infers a `surface_types` list per lens (`"spherical"`, `"flat"`, `"stop"`, `"aspheric"`, `"cylindrical_x"`, `"cylindrical_y"`)
-- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template. Emits `surface_types[]`, `extra[]`, `thicknesses_close[]` arrays, `focus_close_distance`, and `SURFACE_*` type constants
+- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template. Emits `surface_types[]`, `extra[]`, `thicknesses_close[]` arrays, `focus_close_distance`, `squeeze`, and `SURFACE_*` type constants
 - `diagram.py` — Loads pre-rendered lens diagram PNGs from `addon/previews/` as Blender preview icons
-- `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop), `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v), and an optional `[focus]` section for variable element spacing. The aperture stop surface must have `type = "stop"`. Aspheric surfaces use `type = "aspheric"` with `conic` and `aspheric_coeffs` fields. Cylindrical surfaces use `type = "cylindrical_x"` (curvature in X only) or `type = "cylindrical_y"` (curvature in Y only). Other surfaces infer their type from `radius` (0 = flat, nonzero = spherical)
+- `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop, optional squeeze), `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v), and an optional `[focus]` section for variable element spacing. The aperture stop surface must have `type = "stop"`. Aspheric surfaces use `type = "aspheric"` with `conic` and `aspheric_coeffs` fields. Cylindrical surfaces use `type = "cylindrical_x"` (curvature in X only) or `type = "cylindrical_y"` (curvature in Y only). Other surfaces infer their type from `radius` (0 = flat, nonzero = spherical)
 - `blender_manifest.toml` — Blender extension manifest
 
 ## Adding a New Lens
@@ -32,6 +32,7 @@ There are two main parts:
 4. Lens files are loaded alphabetically — the filename determines the enum order in the UI
 5. Regenerate lens diagram PNGs: `uv run scripts/build_diagrams.py`
 6. Optionally add a `[focus]` section for variable element spacing (see below). Lenses without this section use unit focusing (sensor-plane movement only)
+7. For anamorphic lenses, add `squeeze = 2.0` (or the appropriate factor) to the `[lens]` section. The shader scales sensor X coordinates by this factor to automatically desqueeze the output. Spherical lenses omit this field (defaults to 1.0)
 
 ### Variable Element Spacing
 
@@ -103,7 +104,7 @@ abbe_v = 26.5
 
 ## Shader Function Pipeline
 
-1. `load_lens_data()` — generated at registration; selects lens prescription by index. Outputs `surface_types[]` (int per surface: `SURFACE_SPHERICAL=0`, `SURFACE_FLAT=1`, `SURFACE_STOP=2`, `SURFACE_ASPHERIC=3`, `SURFACE_CYLINDRICAL_X=4`, `SURFACE_CYLINDRICAL_Y=5`), `extra[]` (8 floats per surface: k, A4, A6, A8, A10, reserved×3), `thicknesses_close[]` and `focus_close_distance` for variable element spacing
+1. `load_lens_data()` — generated at registration; selects lens prescription by index. Outputs `surface_types[]` (int per surface: `SURFACE_SPHERICAL=0`, `SURFACE_FLAT=1`, `SURFACE_STOP=2`, `SURFACE_ASPHERIC=3`, `SURFACE_CYLINDRICAL_X=4`, `SURFACE_CYLINDRICAL_Y=5`), `extra[]` (8 floats per surface: k, A4, A6, A8, A10, reserved×3), `thicknesses_close[]`, `focus_close_distance` for variable element spacing, and `squeeze` for anamorphic desqueeze
 2. Thickness interpolation — when `focus_close_distance > 0`, interpolates `thicknesses[]` between infinity and close-focus values using `alpha = clamp(close_distance / d_obj, 0, 1)` in reciprocal object-distance space. All downstream functions receive the adjusted thicknesses
 3. `compute_sensor_distance()` — Y-axis ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance. Cylindrical_x surfaces are skipped (no Y power); cylindrical_y surfaces contribute
 4. `compute_exit_pupil()` — Dual X/Y ABCD matrices for rear subsystem to find exit pupil position/magnification per axis. Derives stop index from `surface_types[]`

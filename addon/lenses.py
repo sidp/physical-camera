@@ -92,6 +92,11 @@ def load_lenses(lens_dir: Path) -> list[dict]:
                 f"{toml_path.name}: coating {coating!r} must be one of "
                 f"{valid_coatings}"
             )
+        squeeze = lens.get("squeeze", 1.0)
+        if not isinstance(squeeze, (int, float)) or squeeze <= 0:
+            raise ValueError(
+                f"{toml_path.name}: squeeze {squeeze!r} must be a positive number"
+            )
         surface_types = _resolve_surface_types(surfaces, toml_path.name)
         for i, (s, st) in enumerate(zip(surfaces, surface_types)):
             if st == "aspheric":
@@ -138,6 +143,7 @@ def load_lenses(lens_dir: Path) -> list[dict]:
             "max_fstop": lens["max_fstop"],
             "stop_index": stop_index,
             "coating": coating,
+            "squeeze": squeeze,
             "surfaces": surfaces,
             "surface_types": surface_types,
             "focus": focus,
