@@ -5,8 +5,11 @@ A Blender extension that replaces Blender's built-in camera with a physically-ba
 ## Features
 
 - Sequential ray tracing through multi-element lens designs
-- Fresnel transmission loss and natural vignetting (cos^4 falloff)
+- Spherical, aspheric, and cylindrical surface types
+- Anamorphic lens support with dual-axis ABCD optics and elliptical bokeh
+- Fresnel transmission loss with single/multi coating models and natural vignetting
 - Spectral chromatic aberration (400-700nm continuous sampling)
+- Variable element spacing for internal focusing (when patent data is available)
 - Polygonal aperture blades with adjustable rotation
 - Focus distance driven by Blender's camera settings
 - Debug visualization modes for diagnosing ray behavior
@@ -40,8 +43,17 @@ Focus distance is controlled through Blender's standard camera Depth of Field se
 
 ## Included Lenses
 
-- Double Gauss 50mm f/2 (US Patent 2,673,491)
-- Double Gauss 100mm f/1.7 (US Patent 2,784,643)
+- Canon RF 85mm f/1.2L USM (aspheric, internal focusing)
+- Cooke Triplet 50mm f/4.5
+- Double Gauss 50mm f/2
+- Double Gauss 100mm f/1.7
+- Navarro Anamorphic 2x Cinema (anamorphic, aspheric)
+- Neil Front Anamorphic 2x Cinema (anamorphic, internal focusing)
+- Nikkor AI AF Fisheye 16mm f/2.8D (internal focusing)
+- Petzval 85mm f/2.4
+- Sonnar 50mm f/1.5
+- Tessar 50mm f/2.8
+- Zuiko 18mm f/3.5 (internal focusing)
 
 ## Adding a Lens
 
@@ -52,7 +64,7 @@ Create a `.toml` file in `addon/lenses/` with the following format:
 name = "Lens Name"
 focal_length = 50.0
 max_fstop = 2.0
-stop_index = 5
+coating = "multi"  # "none", "single", or "multi"
 
 [[surface]]
 radius = 29.475
@@ -61,10 +73,22 @@ ior = 1.67
 aperture = 25.2
 abbe_v = 57.0
 
+[[surface]]
+type = "stop"
+radius = 0
+thickness = 2.5
+ior = 1.0
+aperture = 20.0
+abbe_v = 0.0
+
 # ... more surfaces
 ```
 
-Surfaces are listed front-to-back (scene-side to sensor-side). The aperture stop surface should have `radius = 0` and `ior = 1.0`. All dimensions are in millimeters.
+Surfaces are listed front-to-back (scene-side to sensor-side). All dimensions are in millimeters. The aperture stop must have `type = "stop"` with `radius = 0` and `ior = 1.0`. Aspheric surfaces use `type = "aspheric"` with `conic` and `aspheric_coeffs` fields. Cylindrical surfaces for anamorphic lenses use `type = "cylindrical_x"` or `type = "cylindrical_y"`.
+
+After adding a lens, regenerate diagram previews: `uv run scripts/build_diagrams.py`
+
+See `CLAUDE.md` for details on variable element spacing, aspheric coefficients, and cylindrical surface conventions.
 
 ## License
 

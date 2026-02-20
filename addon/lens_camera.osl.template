@@ -155,7 +155,8 @@ float onaxis_fresnel_transmission(
 }
 
 int is_curved_surface(int surface_type) {
-    return (surface_type == SURFACE_SPHERICAL || surface_type == SURFACE_ASPHERIC);
+    return (surface_type == SURFACE_SPHERICAL || surface_type == SURFACE_ASPHERIC
+            || surface_type == SURFACE_CYLINDRICAL_X || surface_type == SURFACE_CYLINDRICAL_Y);
 }
 
 float compute_sensor_distance(
@@ -167,16 +168,19 @@ float compute_sensor_distance(
     float total_length,
     float focus_mm)
 {
-    // Build ABCD system matrix by front-to-back paraxial ray trace.
-    // Convention: M = [[A,B],[C,D]], initialized to identity.
+    // Build ABCD system matrix by front-to-back paraxial ray trace (Y axis).
+    // For anamorphic lenses, sensor distance is derived from Y (spherical
+    // meridian) — matching how cinematographers focus anamorphic lenses.
+    // Cylindrical_x surfaces have no power in Y; cylindrical_y surfaces do.
     float A = 1.0, B = 0.0, C = 0.0, D = 1.0;
 
     for (int i = 0; i < num_surfaces; i++) {
         float n_before = (i == 0) ? 1.0 : iors[i - 1];
         float n_after = iors[i];
 
-        // Refraction matrix (curved surfaces have optical power)
-        if (is_curved_surface(surface_types[i]) && n_before != n_after) {
+        // Refraction matrix — skip surfaces with no Y-axis power
+        if (is_curved_surface(surface_types[i]) && n_before != n_after
+            && surface_types[i] != SURFACE_CYLINDRICAL_X) {
             float phi = (n_after - n_before) / radii[i];
             C -= phi * A;
             D -= phi * B;
@@ -216,51 +220,65 @@ void compute_exit_pupil(
     float thicknesses[MAX_SURFACES],
     float iors[MAX_SURFACES],
     int surface_types[MAX_SURFACES],
-    output float ep_z,
-    output float ep_magnification)
+    output float ep_z_x, output float ep_mag_x,
+    output float ep_z_y, output float ep_mag_y)
 {
     int stop_index = 0;
     for (int i = 0; i < num_surfaces; i++) {
         if (surface_types[i] == SURFACE_STOP) { stop_index = i; break; }
     }
 
-    // Build ABCD matrix for the rear subsystem (stop -> rear vertex).
-    // This gives the exit pupil position and magnification relative to the
-    // physical aperture stop, so we can aim rays at the apparent opening.
-    float A = 1.0, B = 0.0, C = 0.0, D = 1.0;
+    // Build dual ABCD matrices for the rear subsystem (stop -> rear vertex).
+    // Separate X and Y axes to handle cylindrical surfaces correctly.
+    float Ax = 1.0, Bx = 0.0, Cx = 0.0, Dx = 1.0;
+    float Ay = 1.0, By = 0.0, Cy = 0.0, Dy = 1.0;
 
     // Initial transfer from stop to first rear surface
     float t = thicknesses[stop_index] / iors[stop_index];
-    A += t * C;
-    B += t * D;
+    Ax += t * Cx;  Bx += t * Dx;
+    Ay += t * Cy;  By += t * Dy;
 
     for (int i = stop_index + 1; i < num_surfaces; i++) {
         float n_before = iors[i - 1];
         float n_after = iors[i];
 
-        // Refraction (curved surfaces have optical power)
         if (is_curved_surface(surface_types[i]) && n_before != n_after) {
             float phi = (n_after - n_before) / radii[i];
-            C -= phi * A;
-            D -= phi * B;
+            // Spherical/aspheric: power in both axes
+            // Cylindrical_x: power in X only
+            // Cylindrical_y: power in Y only
+            if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                Cx -= phi * Ax;
+                Dx -= phi * Bx;
+            }
+            if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                Cy -= phi * Ay;
+                Dy -= phi * By;
+            }
         }
 
-        // Transfer (skip after last surface)
         if (i < num_surfaces - 1) {
             t = thicknesses[i] / iors[i];
-            A += t * C;
-            B += t * D;
+            Ax += t * Cx;  Bx += t * Dx;
+            Ay += t * Cy;  By += t * Dy;
         }
     }
 
-    if (abs(D) < 1e-10) {
-        ep_z = 0.0;
-        ep_magnification = 0.0;
-        return;
+    if (abs(Dx) < 1e-10) {
+        ep_z_x = 0.0;
+        ep_mag_x = 0.0;
+    } else {
+        ep_z_x = -Bx / Dx;
+        ep_mag_x = abs(1.0 / Dx);
     }
 
-    ep_z = -B / D;
-    ep_magnification = abs(1.0 / D);
+    if (abs(Dy) < 1e-10) {
+        ep_z_y = 0.0;
+        ep_mag_y = 0.0;
+    } else {
+        ep_z_y = -By / Dy;
+        ep_mag_y = abs(1.0 / Dy);
+    }
 }
 
 void compute_field_exit_pupil(
@@ -369,23 +387,82 @@ int intersect_sphere(
     return 0;
 }
 
-float aspheric_sag(float h, float c, float k, float A4, float A6, float A8) {
+int intersect_cylindrical(
+    point ray_origin,
+    vector ray_dir,
+    float sphere_center_z,
+    float radius,
+    int surface_type,
+    output point hit_point)
+{
+    // Cylindrical surface: circle in one axis + z, infinite in the other.
+    // SURFACE_CYLINDRICAL_X: curvature in X-Z plane (flat in Y)
+    // SURFACE_CYLINDRICAL_Y: curvature in Y-Z plane (flat in X)
+    float oz = ray_origin[2] - sphere_center_z;
+    float dz = ray_dir[2];
+
+    float oh, dh;
+    if (surface_type == SURFACE_CYLINDRICAL_X) {
+        oh = ray_origin[0];
+        dh = ray_dir[0];
+    } else {
+        oh = ray_origin[1];
+        dh = ray_dir[1];
+    }
+
+    float a = dh * dh + dz * dz;
+    float b = 2.0 * (oh * dh + oz * dz);
+    float c = oh * oh + oz * oz - radius * radius;
+
+    float disc = b * b - 4.0 * a * c;
+    if (disc < 0.0)
+        return 0;
+
+    float sqrt_disc = sqrt(disc);
+    float t1 = (-b - sqrt_disc) / (2.0 * a);
+    float t2 = (-b + sqrt_disc) / (2.0 * a);
+
+    float vertex_z = sphere_center_z - radius;
+    point p1 = ray_origin + t1 * ray_dir;
+    point p2 = ray_origin + t2 * ray_dir;
+
+    float dist1 = abs(p1[2] - vertex_z);
+    float dist2 = abs(p2[2] - vertex_z);
+
+    if (dist1 < dist2) {
+        if (t1 > 1e-6) {
+            hit_point = p1;
+            return 1;
+        }
+    } else {
+        if (t2 > 1e-6) {
+            hit_point = p2;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+float aspheric_sag(float h, float c, float k, float A4, float A6, float A8, float A10) {
     float h2 = h * h;
     float Q = max(1.0 - (1.0 + k) * c * c * h2, 1e-20);
-    float sag = c * h2 / (1.0 + sqrt(Q)) + A4 * h2 * h2 + A6 * h2 * h2 * h2 + A8 * h2 * h2 * h2 * h2;
+    float sag = c * h2 / (1.0 + sqrt(Q)) + A4 * h2 * h2 + A6 * h2 * h2 * h2
+                + A8 * h2 * h2 * h2 * h2 + A10 * h2 * h2 * h2 * h2 * h2;
     return sag;
 }
 
-float aspheric_sag_prime(float h, float c, float k, float A4, float A6, float A8) {
+float aspheric_sag_prime(float h, float c, float k, float A4, float A6, float A8, float A10) {
     float h2 = h * h;
     float Q = max(1.0 - (1.0 + k) * c * c * h2, 1e-20);
-    return c * h / sqrt(Q) + 4.0 * A4 * h * h2 + 6.0 * A6 * h * h2 * h2 + 8.0 * A8 * h * h2 * h2 * h2;
+    return c * h / sqrt(Q) + 4.0 * A4 * h * h2 + 6.0 * A6 * h * h2 * h2
+           + 8.0 * A8 * h * h2 * h2 * h2 + 10.0 * A10 * h * h2 * h2 * h2 * h2;
 }
 
 int intersect_aspheric(
     point ray_origin, vector ray_dir,
     float vertex_z, float radius,
-    float k, float A4, float A6, float A8,
+    float k, float A4, float A6, float A8, float A10,
     output point hit_point)
 {
     // Seed with spherical intersection
@@ -410,11 +487,11 @@ int intersect_aspheric(
         float py = oy + t * dy;
         float pz = oz + t * dz;
         float h = sqrt(px * px + py * py);
-        float s = aspheric_sag(h, c, k, A4, A6, A8);
+        float s = aspheric_sag(h, c, k, A4, A6, A8, A10);
         F = pz - vertex_z - s;
         if (abs(F) < 1e-8)
             break;
-        float sp = aspheric_sag_prime(h, c, k, A4, A6, A8);
+        float sp = aspheric_sag_prime(h, c, k, A4, A6, A8, A10);
         float dh_dt = (h > 1e-10) ? (px * dx + py * dy) / h : 0.0;
         float dF_dt = dz - sp * dh_dt;
         if (abs(dF_dt) < 1e-20)
@@ -442,7 +519,7 @@ int refract_at_surface(
     float blade_rotation,
     int surface_type,
     float coating,
-    float k, float A4, float A6, float A8,
+    float k, float A4, float A6, float A8, float A10,
     output point new_origin,
     output vector new_dir,
     output float transmission)
@@ -499,7 +576,11 @@ int refract_at_surface(
     point hit = point(0, 0, 0);
 
     if (surface_type == SURFACE_ASPHERIC) {
-        if (!intersect_aspheric(ray_origin, ray_dir, vertex_z, radius, k, A4, A6, A8, hit))
+        if (!intersect_aspheric(ray_origin, ray_dir, vertex_z, radius, k, A4, A6, A8, A10, hit))
+            return 0;
+    } else if (surface_type == SURFACE_CYLINDRICAL_X || surface_type == SURFACE_CYLINDRICAL_Y) {
+        float cyl_center_z = vertex_z + radius;
+        if (!intersect_cylindrical(ray_origin, ray_dir, cyl_center_z, radius, surface_type, hit))
             return 0;
     } else {
         float sphere_center_z = vertex_z + radius;
@@ -518,11 +599,17 @@ int refract_at_surface(
         float c = 1.0 / radius;
         float h = sqrt(hit[0] * hit[0] + hit[1] * hit[1]);
         if (h > 1e-10) {
-            float sp = aspheric_sag_prime(h, c, k, A4, A6, A8);
+            float sp = aspheric_sag_prime(h, c, k, A4, A6, A8, A10);
             N = normalize(vector(-sp * hit[0] / h, -sp * hit[1] / h, 1.0));
         } else {
             N = vector(0, 0, 1);
         }
+    } else if (surface_type == SURFACE_CYLINDRICAL_X) {
+        float cyl_center_z = vertex_z + radius;
+        N = normalize(vector(hit[0], 0, hit[2] - cyl_center_z));
+    } else if (surface_type == SURFACE_CYLINDRICAL_Y) {
+        float cyl_center_z = vertex_z + radius;
+        N = normalize(vector(0, hit[1], hit[2] - cyl_center_z));
     } else {
         float sphere_center_z = vertex_z + radius;
         N = normalize(hit - point(0, 0, sphere_center_z));
@@ -638,13 +725,13 @@ int trace_lens_system(
         }
 
         int base = idx * N_EXTRA;
-        float k_i = extra[base], A4_i = extra[base + 1], A6_i = extra[base + 2], A8_i = extra[base + 3];
+        float k_i = extra[base], A4_i = extra[base + 1], A6_i = extra[base + 2], A8_i = extra[base + 3], A10_i = extra[base + 4];
 
         point  new_p = point(0, 0, 0);
         vector new_d = vector(0, 0, 0);
         float surface_transmission = 1.0;
 
-        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, new_p, new_d, surface_transmission);
+        int result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, A10_i, new_p, new_d, surface_transmission);
 
         // Mirror case: a flat surface was processed but the adjacent curved
         // surface's sphere extends past it, making intersection unreachable.
@@ -656,7 +743,7 @@ int trace_lens_system(
             surfaces_passed = saved_surfaces;
             saved_idx = -1;
 
-            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, new_p, new_d, surface_transmission);
+            result = refract_at_surface(p, d, vertex_z[idx], radii[idx], semi_ap, n1, n2, num_blades, blade_rotation, surface_types[idx], coating, k_i, A4_i, A6_i, A8_i, A10_i, new_p, new_d, surface_transmission);
             if (result != 1) {
                 if (result == 0) failure_type = 1;
                 else if (result == -1) failure_type = 2;
@@ -811,9 +898,13 @@ shader lens_camera(
     float focus_close_distance = 0.0;
     int num_surfaces = 0;
     float coating = 0.0;
+    float squeeze = 1.0;
     load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
                    surface_types, extra, thicknesses_close, focus_close_distance,
-                   num_surfaces, coating);
+                   num_surfaces, coating, squeeze);
+
+    // Anamorphic desqueeze: narrow sensor X sampling so the lens squeeze produces correct proportions
+    sensor_x /= squeeze;
 
     int stop_index = 0;
     for (int i = 0; i < num_surfaces; i++) {
@@ -882,14 +973,32 @@ shader lens_camera(
     // Sample on the exit pupil plane to reduce wasted rays for off-axis points.
     // The exit pupil is the image of the aperture stop as seen through the rear
     // lens group — it differs in position and size from the physical stop.
+    // For anamorphic lenses, the exit pupil has separate X/Y magnifications.
     float stop_semi_ap = apertures[stop_index] * 0.5 * aperture_scale;
 
-    float ep_z = 0.0;
-    float ep_magnification = 1.0;
+    float ep_z_x = 0.0, ep_mag_x = 1.0;
+    float ep_z_y = 0.0, ep_mag_y = 1.0;
     compute_exit_pupil(num_surfaces, radii, thicknesses, dispersed_iors, surface_types,
-                       ep_z, ep_magnification);
-    float aim_z = (ep_magnification > 0.0) ? ep_z : stop_z;
-    float aim_semi_ap = (ep_magnification > 0.0) ? stop_semi_ap * ep_magnification : stop_semi_ap;
+                       ep_z_x, ep_mag_x, ep_z_y, ep_mag_y);
+
+    // Use Y-axis exit pupil for aim position (focus axis)
+    float aim_z = (ep_mag_y > 0.0) ? ep_z_y : stop_z;
+    float aim_semi_ap_y = (ep_mag_y > 0.0) ? stop_semi_ap * ep_mag_y : stop_semi_ap;
+
+    // Project X exit pupil to the aim plane by matching angular subtense.
+    // For anamorphic lenses the X exit pupil can be far from the Y one
+    // (even behind the sensor), so raw magnification at the wrong Z gives
+    // a wildly wrong aperture size. For spherical lenses ep_z_x == ep_z_y
+    // and the projection is a no-op.
+    float aim_semi_ap_x = aim_semi_ap_y;
+    if (ep_mag_x > 0.0) {
+        float x_pupil_semi_ap = stop_semi_ap * ep_mag_x;
+        float dist_to_ep_x = abs(sensor_z - ep_z_x);
+        float dist_to_aim  = abs(sensor_z - aim_z);
+        if (dist_to_ep_x > 1e-6)
+            aim_semi_ap_x = x_pupil_semi_ap * dist_to_aim / dist_to_ep_x;
+    }
+    float aim_semi_ap = max(aim_semi_ap_x, aim_semi_ap_y);
 
     float ep_cx = 0.0, ep_cy = 0.0, field_semi_ap = aim_semi_ap;
     compute_field_exit_pupil(sensor_x, sensor_y, sensor_z,
@@ -903,13 +1012,25 @@ shader lens_camera(
         return;
     }
 
+    // Scale field exit pupil separately for X and Y
+    float field_semi_ap_x = field_semi_ap;
+    float field_semi_ap_y = field_semi_ap;
+    if (aim_semi_ap > 1e-10) {
+        float ratio = aim_semi_ap_x / aim_semi_ap_y;
+        if (ratio > 1.0) {
+            field_semi_ap_y = field_semi_ap / ratio;
+        } else if (ratio < 1.0) {
+            field_semi_ap_x = field_semi_ap * ratio;
+        }
+    }
+
     float blade_rot_rad = blade_rotation * M_PI / 180.0;
     float ax = 0.0;
     float ay = 0.0;
 
-    // Ngon barycentric sampling: rnd[0] selects the sector and u1,
-    // rnd[1] provides u2. Wavelength is hashed separately so it has
-    // no systematic relationship to aperture position.
+    // Ngon barycentric sampling with separate X/Y scale factors for
+    // elliptical exit pupil (anamorphic lenses). For spherical lenses,
+    // field_semi_ap_x == field_semi_ap_y — identical behavior.
     // For circular aperture (blades=0), use 128-gon as a proxy.
     {
         int n = (aperture_blades >= 3) ? aperture_blades : 128;
@@ -924,8 +1045,8 @@ shader lens_camera(
         }
         float a0 = blade_rot_rad + float(sector) * sector_angle;
         float a1 = blade_rot_rad + float(sector + 1) * sector_angle;
-        ax = u1 * field_semi_ap * cos(a0) + u2 * field_semi_ap * cos(a1);
-        ay = u1 * field_semi_ap * sin(a0) + u2 * field_semi_ap * sin(a1);
+        ax = u1 * field_semi_ap_x * cos(a0) + u2 * field_semi_ap_x * cos(a1);
+        ay = u1 * field_semi_ap_y * sin(a0) + u2 * field_semi_ap_y * sin(a1);
     }
 
     ax += ep_cx;

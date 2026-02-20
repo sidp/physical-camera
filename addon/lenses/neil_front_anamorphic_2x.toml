@@ -1,0 +1,245 @@
+[lens]
+name = "Neil Front Anamorphic 2x Cinema"
+patent = "US Patent 9,341,827 B2 (Neil, 2016)"
+focal_length = 42.47
+max_fstop = 2.4
+coating = "multi"
+squeeze = 2.0
+
+# Negative spherical focus group
+
+[[surface]]
+radius = 126.302
+thickness = 5.2
+ior = 1.713
+aperture = 89.62
+abbe_v = 53.9
+
+[[surface]]
+radius = 97.245
+thickness = 36.814
+ior = 1.0
+aperture = 83.36
+abbe_v = 0.0
+
+[[surface]]
+radius = 353.064
+thickness = 3.8
+ior = 1.734
+aperture = 67.86
+abbe_v = 51.5
+
+[[surface]]
+radius = 92.759
+thickness = 6.883
+ior = 1.0
+aperture = 62.80
+abbe_v = 0.0
+
+# Front anamorphic group — cylindrical elements before the stop
+# produce characteristic elongated (oval) bokeh
+
+# Plano-cylindrical X element
+
+[[surface]]
+radius = 0
+thickness = 3.5
+ior = 1.5163
+aperture = 50.52
+abbe_v = 64.1
+
+[[surface]]
+type = "cylindrical_x"
+radius = 42.117
+thickness = 14.839
+ior = 1.0
+aperture = 48.74
+abbe_v = 0.0
+
+# Cylindrical X-plano element
+
+[[surface]]
+type = "cylindrical_x"
+radius = -32.15
+thickness = 3.45
+ior = 1.497
+aperture = 45.80
+abbe_v = 81.5
+
+[[surface]]
+radius = 0
+thickness = 5.746
+ior = 1.0
+aperture = 45.52
+abbe_v = 0.0
+
+# Cylindrical Y thick element
+
+[[surface]]
+type = "cylindrical_y"
+radius = -173.155
+thickness = 27.94
+ior = 1.8467
+aperture = 45.18
+abbe_v = 23.8
+
+[[surface]]
+type = "cylindrical_y"
+radius = -162.219
+thickness = 0.63
+ior = 1.0
+aperture = 46.60
+abbe_v = 0.0
+
+# Plano-cylindrical X element
+
+[[surface]]
+radius = 0
+thickness = 12.51
+ior = 1.6779
+aperture = 46.42
+abbe_v = 55.3
+
+[[surface]]
+type = "cylindrical_x"
+radius = -61.868
+thickness = 0.653
+ior = 1.0
+aperture = 45.78
+abbe_v = 0.0
+
+# Cylindrical Y element
+
+[[surface]]
+type = "cylindrical_y"
+radius = 50.915
+thickness = 9.576
+ior = 1.883
+aperture = 44.56
+abbe_v = 40.8
+
+[[surface]]
+type = "cylindrical_y"
+radius = 46.847
+thickness = 1.26
+ior = 1.0
+aperture = 41.64
+abbe_v = 0.0
+
+# Rear positive spherical group
+
+[[surface]]
+radius = 53.607
+thickness = 7.688
+ior = 1.8467
+aperture = 40.54
+abbe_v = 23.8
+
+[[surface]]
+radius = 31.937
+thickness = 2.459
+ior = 1.0
+aperture = 35.90
+abbe_v = 0.0
+
+[[surface]]
+radius = 33.809
+thickness = 10.712
+ior = 1.713
+aperture = 36.34
+abbe_v = 53.9
+
+[[surface]]
+radius = -417.944
+thickness = 0.25
+ior = 1.0
+aperture = 34.28
+abbe_v = 0.0
+
+[[surface]]
+radius = 34.017
+thickness = 13.716
+ior = 1.8052
+aperture = 30.84
+abbe_v = 25.5
+
+[[surface]]
+radius = 26.11
+thickness = 13.684
+ior = 1.0
+aperture = 20.10
+abbe_v = 0.0
+
+# Aperture stop
+
+[[surface]]
+type = "stop"
+radius = 0
+thickness = 8.868
+ior = 1.0
+aperture = 15.02
+abbe_v = 0.0
+
+# Cemented doublet
+
+[[surface]]
+radius = -18.475
+thickness = 2.64
+ior = 1.8052
+aperture = 13.46
+abbe_v = 25.5
+
+[[surface]]
+radius = 82.967
+thickness = 8.997
+ior = 1.6485
+aperture = 16.40
+abbe_v = 53.0
+
+[[surface]]
+radius = -31.527
+thickness = 0.14
+ior = 1.0
+aperture = 21.70
+abbe_v = 0.0
+
+# Rear elements
+
+[[surface]]
+radius = -121.596
+thickness = 3.432
+ior = 1.8348
+aperture = 22.98
+abbe_v = 42.7
+
+[[surface]]
+radius = -38.403
+thickness = 0.1
+ior = 1.0
+aperture = 24.06
+abbe_v = 0.0
+
+[[surface]]
+radius = 84.972
+thickness = 3.447
+ior = 1.8348
+aperture = 25.34
+abbe_v = 42.7
+
+[[surface]]
+radius = -179.044
+thickness = 0.0
+ior = 1.0
+aperture = 26.40
+abbe_v = 0.0
+
+[focus]
+close_distance = 740.0
+
+[[focus.variable]]
+surface = 1
+thickness_close = 16.553
+
+[[focus.variable]]
+surface = 3
+thickness_close = 27.144

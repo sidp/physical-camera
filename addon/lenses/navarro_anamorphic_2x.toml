@@ -1,0 +1,270 @@
+[lens]
+name = "Navarro Anamorphic 2x Cinema"
+patent = "US Patent 9,063,321 B2 (Navarro, 2015)"
+focal_length = 129.0
+max_fstop = 3.0
+coating = "multi"
+squeeze = 2.0
+
+# Front spherical group
+
+[[surface]]
+radius = 59.651
+thickness = 13.5165
+ior = 1.779
+aperture = 60.195
+abbe_v = 37.4
+
+[[surface]]
+radius = 0
+thickness = 8.3239
+ior = 1.0
+aperture = 56.327
+abbe_v = 0.0
+
+[[surface]]
+radius = -387.152
+thickness = 3.175
+ior = 1.607
+aperture = 44.660
+abbe_v = 38.2
+
+[[surface]]
+radius = 39.359
+thickness = 14.6763
+ior = 1.0
+aperture = 38.142
+abbe_v = 0.0
+
+[[surface]]
+radius = -77.204
+thickness = 3.3748
+ior = 1.644
+aperture = 35.637
+abbe_v = 37.2
+
+[[surface]]
+radius = 134.564
+thickness = 1.9489
+ior = 1.0
+aperture = 34.986
+abbe_v = 0.0
+
+# Cemented doublet
+
+[[surface]]
+radius = 1841.890
+thickness = 3.1599
+ior = 1.729
+aperture = 35.062
+abbe_v = 30.3
+
+[[surface]]
+radius = 44.564
+thickness = 6.1538
+ior = 1.665
+aperture = 35.058
+abbe_v = 54.6
+
+[[surface]]
+radius = -99.356
+thickness = 5.867
+ior = 1.0
+aperture = 35.092
+abbe_v = 0.0
+
+[[surface]]
+radius = 74.137
+thickness = 3.3831
+ior = 1.834
+aperture = 34.341
+abbe_v = 37.2
+
+[[surface]]
+radius = -394.165
+thickness = 2.75
+ior = 1.0
+aperture = 34.025
+abbe_v = 0.0
+
+# Aperture stop
+
+[[surface]]
+type = "stop"
+radius = 0
+thickness = 2.0043
+ior = 1.0
+aperture = 28.289
+abbe_v = 0.0
+
+# First cylindrical group (curvature in X, flat in Y)
+
+[[surface]]
+type = "cylindrical_x"
+radius = -99.505
+thickness = 3.0
+ior = 1.560
+aperture = 28.204
+abbe_v = 68.8
+
+[[surface]]
+type = "cylindrical_x"
+radius = 66.864
+thickness = 2.5329
+ior = 1.0
+aperture = 28.472
+abbe_v = 0.0
+
+# Flat-front spherical element
+
+[[surface]]
+radius = 0
+thickness = 6.8
+ior = 1.760
+aperture = 28.803
+abbe_v = 26.0
+
+[[surface]]
+radius = 106.0
+thickness = 18.9558
+ior = 1.0
+aperture = 30.268
+abbe_v = 0.0
+
+# Second cylindrical group (curvature in X, flat in Y)
+
+[[surface]]
+type = "cylindrical_x"
+radius = 214.178
+thickness = 10.562
+ior = 1.760
+aperture = 42.126
+abbe_v = 42.4
+
+[[surface]]
+type = "cylindrical_x"
+radius = -86.077
+thickness = 0.5
+ior = 1.0
+aperture = 44.037
+abbe_v = 0.0
+
+# Spherical group
+
+[[surface]]
+radius = 66.662
+thickness = 12.0
+ior = 1.740
+aperture = 44.8
+abbe_v = 44.3
+
+[[surface]]
+radius = -253.776
+thickness = 0.8248
+ior = 1.0
+aperture = 43.062
+abbe_v = 0.0
+
+# Cylindrical Y element
+
+[[surface]]
+type = "cylindrical_y"
+radius = 80.514
+thickness = 4.9899
+ior = 1.761
+aperture = 42.07
+abbe_v = 26.5
+
+[[surface]]
+radius = 0
+thickness = 3.8377
+ior = 1.0
+aperture = 40.502
+abbe_v = 0.0
+
+# Cemented doublet
+
+[[surface]]
+radius = -317.653
+thickness = 9.0831
+ior = 1.670
+aperture = 30.0969
+abbe_v = 31.7
+
+[[surface]]
+radius = 24.228
+thickness = 8.7885
+ior = 1.700
+aperture = 27.5772
+abbe_v = 49.0
+
+[[surface]]
+radius = -699.999
+thickness = 1.4853
+ior = 1.0
+aperture = 26.6986
+abbe_v = 0.0
+
+# Cylindrical Y group
+
+[[surface]]
+type = "cylindrical_y"
+radius = -88.266
+thickness = 3.0194
+ior = 1.589
+aperture = 26.0934
+abbe_v = 63.1
+
+[[surface]]
+type = "cylindrical_y"
+radius = 31.793
+thickness = 4.1228
+ior = 1.0
+aperture = 25.3896
+abbe_v = 0.0
+
+# Rear spherical group
+
+[[surface]]
+radius = -66.384
+thickness = 9.7264
+ior = 1.741
+aperture = 24.2682
+abbe_v = 27.4
+
+[[surface]]
+radius = 36.450
+thickness = 5.1279
+ior = 1.0
+aperture = 25.3847
+abbe_v = 0.0
+
+# Final element — S30 spherical, S31 aspheric
+
+[[surface]]
+radius = 57.336
+thickness = 5.2776
+ior = 1.830
+aperture = 30.6349
+abbe_v = 37.4
+
+[[surface]]
+type = "aspheric"
+radius = -59.820
+thickness = 0.0
+ior = 1.0
+aperture = 30.9171
+abbe_v = 0.0
+conic = 0.0
+aspheric_coeffs = [8.75413e-7, -1.46573e-9, 2.5569e-12, -4.86557e-15]
+
+[focus]
+close_distance = 1000.0
+
+[[focus.variable]]
+surface = 3
+thickness_close = 1.73
+
+[[focus.variable]]
+surface = 21
+thickness_close = 6.70

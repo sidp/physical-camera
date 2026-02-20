@@ -7,7 +7,7 @@ from .lenses import MAX_SURFACES, load_lenses
 N_EXTRA = 8
 
 _COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
-_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3}
+_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3, "cylindrical_x": 4, "cylindrical_y": 5}
 
 
 def _format_surface_assignments(
@@ -44,6 +44,7 @@ def _format_surface_assignments(
         base = i * N_EXTRA
         k = s.get("conic", 0.0)
         coeffs = s.get("aspheric_coeffs", [0.0, 0.0, 0.0])
+        a10 = coeffs[3] if len(coeffs) >= 4 else 0.0
         lines.append(
             f"        extra[{base}] = {k};  "
             f"extra[{base + 1}] = {coeffs[0]};  "
@@ -51,7 +52,7 @@ def _format_surface_assignments(
             f"extra[{base + 3}] = {coeffs[2]};"
         )
         lines.append(
-            f"        extra[{base + 4}] = 0.0;  "
+            f"        extra[{base + 4}] = {a10};  "
             f"extra[{base + 5}] = 0.0;  "
             f"extra[{base + 6}] = 0.0;  "
             f"extra[{base + 7}] = 0.0;"
@@ -67,16 +68,19 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         f"#define N_EXTRA {N_EXTRA}",
         f"#define MAX_EXTRA {max_extra}",
         "",
-        "#define SURFACE_SPHERICAL 0",
-        "#define SURFACE_FLAT      1",
-        "#define SURFACE_STOP      2",
-        "#define SURFACE_ASPHERIC  3",
+        "#define SURFACE_SPHERICAL     0",
+        "#define SURFACE_FLAT          1",
+        "#define SURFACE_STOP          2",
+        "#define SURFACE_ASPHERIC      3",
+        "#define SURFACE_CYLINDRICAL_X 4",
+        "#define SURFACE_CYLINDRICAL_Y 5",
         "",
         "// extra[i*N_EXTRA + 0] = k (conic constant)",
         "// extra[i*N_EXTRA + 1] = A4 (4th-order aspheric coefficient)",
         "// extra[i*N_EXTRA + 2] = A6 (6th-order aspheric coefficient)",
         "// extra[i*N_EXTRA + 3] = A8 (8th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 4..7] = reserved",
+        "// extra[i*N_EXTRA + 4] = A10 (10th-order aspheric coefficient)",
+        "// extra[i*N_EXTRA + 5..7] = reserved",
         "",
         "void load_lens_data(",
         "    int lens_type,",
@@ -90,7 +94,8 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         "    output float thicknesses_close[MAX_SURFACES],",
         "    output float focus_close_distance,",
         "    output int num_surfaces,",
-        "    output float coating)",
+        "    output float coating,",
+        "    output float squeeze)",
         "{",
     ]
 
@@ -103,6 +108,7 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         lines.append(f"        // {lens['name']}")
         lines.append(f"        num_surfaces = {len(lens['surfaces'])};")
         lines.append(f"        coating = {coating_val};")
+        lines.append(f"        squeeze = {float(lens['squeeze'])};")
         lines.append(f"        focus_close_distance = {close_dist};")
         lines.append(_format_surface_assignments(
             lens["surfaces"], lens["surface_types"], focus
@@ -117,6 +123,7 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
     lines.append(f"        // Fallback to {default['name']}")
     lines.append(f"        num_surfaces = {len(default['surfaces'])};")
     lines.append(f"        coating = {default_coating};")
+    lines.append(f"        squeeze = {float(default['squeeze'])};")
     lines.append(f"        focus_close_distance = {default_close_dist};")
     lines.append(_format_surface_assignments(
         default["surfaces"], default["surface_types"], default_focus

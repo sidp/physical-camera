@@ -34,6 +34,17 @@ def _is_stop(s):
     return s.get("type") == "stop"
 
 
+def _diagram_radius(s):
+    """Effective radius for Y-Z cross-section diagram.
+
+    Cylindrical_x surfaces have curvature only in X, so they appear flat
+    in the Y-Z view. All other surfaces use their actual radius.
+    """
+    if s.get("type") == "cylindrical_x":
+        return 0.0
+    return s["radius"]
+
+
 def _compute_vertex_positions(surfaces):
     positions = [0.0]
     for s in surfaces[:-1]:
@@ -98,8 +109,8 @@ def _element_polygon(surfaces, positions, front_i, back_i, effective_aps, to_px)
     """Build a polygon outline for a glass element between two surfaces."""
     front_vx = positions[front_i]
     back_vx = positions[back_i]
-    front_r = surfaces[front_i]["radius"]
-    back_r = surfaces[back_i]["radius"]
+    front_r = _diagram_radius(surfaces[front_i])
+    back_r = _diagram_radius(surfaces[back_i])
 
     front_pts = _arc_points(front_vx, front_r, effective_aps[front_i], to_px)
     back_pts = _arc_points(back_vx, back_r, effective_aps[back_i], to_px)
@@ -146,7 +157,7 @@ def _trace_ray(surfaces, positions, start_y):
 
     for i, s in enumerate(surfaces):
         vx = positions[i]
-        radius = s["radius"]
+        radius = _diagram_radius(s)
         semi_ap = s["aperture"] * 0.5
         n2 = s["ior"]
 
@@ -277,15 +288,15 @@ def _render_lens(surfaces):
         if i > 0 and not _is_stop(surfaces[i - 1]):
             s_prev = surfaces[i - 1]
             _, back_ap = _effective_semi_aperture(
-                positions[i - 1], s_prev["radius"], s_prev["aperture"] * 0.5,
-                positions[i], s["radius"], eff,
+                positions[i - 1], _diagram_radius(s_prev), s_prev["aperture"] * 0.5,
+                positions[i], _diagram_radius(s), eff,
             )
             eff = min(eff, back_ap)
         if i < len(surfaces) - 1 and not _is_stop(surfaces[i + 1]):
             s_next = surfaces[i + 1]
             front_ap, _ = _effective_semi_aperture(
-                positions[i], s["radius"], eff,
-                positions[i + 1], s_next["radius"], s_next["aperture"] * 0.5,
+                positions[i], _diagram_radius(s), eff,
+                positions[i + 1], _diagram_radius(s_next), s_next["aperture"] * 0.5,
             )
             eff = min(eff, front_ap)
         effective_aps.append(eff)
@@ -301,16 +312,17 @@ def _render_lens(surfaces):
         if _is_stop(s):
             continue
         semi_ap = effective_aps[i]
+        r = _diagram_radius(s)
         is_cemented = False
         for front_i, back_i in elements:
             if front_i < i < back_i:
                 is_cemented = True
                 break
         if is_cemented:
-            _draw_arc(draw, positions[i], s["radius"], semi_ap, to_px,
+            _draw_arc(draw, positions[i], r, semi_ap, to_px,
                        _CEMENTED_LINE, 2 * _SUPERSAMPLE)
         else:
-            _draw_arc(draw, positions[i], s["radius"], semi_ap, to_px,
+            _draw_arc(draw, positions[i], r, semi_ap, to_px,
                        _SURFACE_LINE, 2 * _SUPERSAMPLE)
 
     # Draw element closing edges
@@ -320,11 +332,11 @@ def _render_lens(surfaces):
             ap_j1 = effective_aps[j + 1]
             for sign in (1.0, -1.0):
                 p0 = to_px(
-                    _arc_x(positions[j], surfaces[j]["radius"], sign * ap_j),
+                    _arc_x(positions[j], _diagram_radius(surfaces[j]), sign * ap_j),
                     sign * ap_j,
                 )
                 p1 = to_px(
-                    _arc_x(positions[j + 1], surfaces[j + 1]["radius"], sign * ap_j1),
+                    _arc_x(positions[j + 1], _diagram_radius(surfaces[j + 1]), sign * ap_j1),
                     sign * ap_j1,
                 )
                 draw.line([p0, p1], fill=_SURFACE_LINE, width=2 * _SUPERSAMPLE)
