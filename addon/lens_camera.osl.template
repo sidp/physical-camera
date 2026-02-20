@@ -1096,8 +1096,6 @@ shader lens_camera(
         [[ string description = "Enable ghost/flare simulation (double-bounce reflections)." ]],
     float ghost_intensity = 1.0
         [[ string description = "Brightness multiplier for ghost images." ]],
-    float ghost_fraction = 0.1
-        [[ string description = "Fraction of samples allocated to ghost paths when enabled." ]],
     float debug_mode = 0.0
         [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction, 4=ghosts only" ]],
     output point position = 0,
@@ -1314,6 +1312,7 @@ shader lens_camera(
     int ghost_a = -1, ghost_b = -1;
     float ghost_pair_weight = 0.0;
     float ghost_total_weight = 0.0;
+    float adaptive_frac = 0.0;
 
     if (lens_ghosts) {
         // Normal-incidence Fresnel reflectance per surface (with coating)
@@ -1338,11 +1337,18 @@ shader lens_camera(
         }
 
         if (num_ghost_pairs > 0 && ghost_total_weight > 0.0) {
+            // Adaptive sample allocation: spend more on bright ghosts (uncoated),
+            // less on dim ghosts (multicoated). sqrt() tames the quadratic growth
+            // of total_weight with surface count.
+            adaptive_frac = clamp(
+                sqrt(ghost_total_weight) * ghost_intensity * 2.0,
+                0.02, 0.5);
+
             float ghost_hash = sin(rnd[0] * 45.233 + rnd[1] * 97.113) * 21453.1211;
             ghost_hash = ghost_hash - floor(ghost_hash);
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
 
-            if (ghosts_only || ghost_hash < ghost_fraction) {
+            if (ghosts_only || ghost_hash < adaptive_frac) {
                 trace_ghost = 1;
 
                 // Select pair with probability proportional to R_a * R_b
@@ -1415,7 +1421,7 @@ shader lens_camera(
             float weight = cos_theta * cos_theta * cos_theta * cos_theta;
 
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
-            float frac = ghosts_only ? 1.0 : ghost_fraction;
+            float frac = ghosts_only ? 1.0 : adaptive_frac;
             // 1/pdf = ghost_total_weight / ghost_pair_weight replaces num_ghost_pairs
             float w = weight * (ghost_T / onaxis_T)
                     * (ghost_total_weight / ghost_pair_weight) / frac * ghost_intensity;
@@ -1496,7 +1502,7 @@ shader lens_camera(
 
         // Compensate for fewer direct samples when ghosts are active
         if (lens_ghosts && num_ghost_pairs > 0)
-            w /= (1.0 - ghost_fraction);
+            w /= (1.0 - adaptive_frac);
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,

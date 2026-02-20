@@ -156,6 +156,8 @@ When `lens_ghosts` is enabled, a fraction (`ghost_fraction`, default 0.1) of sam
 - `is_curved_surface()` returns true for `SURFACE_SPHERICAL`, `SURFACE_ASPHERIC`, `SURFACE_CYLINDRICAL_X`, and `SURFACE_CYLINDRICAL_Y` — used for ABCD power and sphere-overlap logic
 - Focusing uses variable element spacing when patent data is available (`focus_close_distance > 0`), falling back to unit focusing (sensor-plane movement only) otherwise. The ABCD solve computes the correct sensor position for either case
 - Fresnel transmission is tracked per-surface and normalized against on-axis transmission for exposure compensation
+- Coating reflectance uses the Airy thin-film interference formula (quarter-wave MgF₂, nc=1.38, design λ=550nm) with wavelength and angle dependence. Single coating returns the film reflectance directly; multicoating applies a power-law (ratio³) clamped to bare Fresnel
+- Ghost sample allocation is adaptive: `clamp(sqrt(ghost_total_weight) * ghost_intensity * 2.0, 0.02, 0.5)` where `ghost_total_weight` is the sum of all `R_a × R_b` pair products. This gives ~37% for uncoated lenses (bright ghosts) down to ~6% for multicoated (dim ghosts)
 
 ## OSL Language Constraints (Blender/Cycles)
 
