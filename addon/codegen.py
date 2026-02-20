@@ -7,7 +7,7 @@ from .lenses import MAX_SURFACES, load_lenses
 N_EXTRA = 8
 
 _COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
-_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3}
+_TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3, "cylindrical_x": 4, "cylindrical_y": 5}
 
 
 def _format_surface_assignments(
@@ -68,10 +68,12 @@ def _generate_load_lens_data(lenses: list[dict]) -> str:
         f"#define N_EXTRA {N_EXTRA}",
         f"#define MAX_EXTRA {max_extra}",
         "",
-        "#define SURFACE_SPHERICAL 0",
-        "#define SURFACE_FLAT      1",
-        "#define SURFACE_STOP      2",
-        "#define SURFACE_ASPHERIC  3",
+        "#define SURFACE_SPHERICAL     0",
+        "#define SURFACE_FLAT          1",
+        "#define SURFACE_STOP          2",
+        "#define SURFACE_ASPHERIC      3",
+        "#define SURFACE_CYLINDRICAL_X 4",
+        "#define SURFACE_CYLINDRICAL_Y 5",
         "",
         "// extra[i*N_EXTRA + 0] = k (conic constant)",
         "// extra[i*N_EXTRA + 1] = A4 (4th-order aspheric coefficient)",
