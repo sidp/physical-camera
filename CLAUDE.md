@@ -6,6 +6,15 @@ Physical Camera — a Blender extension that replaces Blender's built-in camera 
 
 Requires Blender 4.5+ with Cycles and OSL enabled.
 
+## Goals
+
+The primary goal is to accurately and realistically simulate real-world lenses. Accuracy and realism take priority in design decisions.
+
+Performance and code architecture are secondary but important constraints:
+
+- **Performance** — Rendering is expected to be slower than Blender's built-in camera due to the physically-based lens model. Features that add significant per-ray cost should be toggleable so users can choose the accuracy/speed tradeoff. Before implementing an expensive feature, consider whether approximations or importance sampling can bring the cost down
+- **Complexity** — Features that can't be cleanly integrated into the existing architecture should prompt a refactor before implementation, not after. Avoid bolting complex behavior onto code that wasn't designed for it — restructure first so the new feature fits naturally
+
 ## Architecture
 
 There are two main parts:
@@ -110,12 +119,24 @@ abbe_v = 26.5
 3. `compute_sensor_distance()` — Y-axis ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance. Cylindrical_x surfaces are skipped (no Y power); cylindrical_y surfaces contribute
 4. `compute_exit_pupil()` — Dual X/Y ABCD matrices for rear subsystem to find exit pupil position/magnification per axis. Derives stop index from `surface_types[]`
 5. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures. Derives stop index from `surface_types[]`
-6. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch
-7. `refract_at_surface()` — dispatches on `surface_type`: spherical (ray-sphere intersection + Snell's law), aspheric (Newton-Raphson intersection + analytical normal + Snell's law), cylindrical (ray-cylinder intersection + axis-aligned normal + Snell's law), flat (plane intersection + Snell's law), or stop (shaped aperture clip, no refraction)
-8. `check_aperture_at_plane()` — projects a ray to a z-plane and checks circular or n-gon aperture clip
-9. `refract_at_flat_plane()` — Snell's law at a flat surface with Fresnel transmittance
+6. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch. Includes sphere-overlap retry logic for thin flat surfaces adjacent to curved ones
+7. `find_surface_intersection()` — geometry-only helper: finds intersection point and surface normal for any surface type (flat, stop, spherical, aspheric, cylindrical). Returns 1=hit, 0=miss, -1=clipped
+8. `refract_at_surface()` — calls `find_surface_intersection()`, then applies Snell's law + Fresnel transmittance. Stops pass through without refraction
+9. `reflect_at_surface()` — calls `find_surface_intersection()`, then applies `reflect()` + Fresnel reflectance. Used for ghost bounces (never called on stops)
+10. `trace_surface_range()` — traces a contiguous range of surfaces in either direction (step=±1). Refracts at each surface except an optional reflect_at_idx where it reflects. No sphere-overlap retry logic
+11. `trace_ghost_path()` — composes three `trace_surface_range()` calls for a double-bounce ghost path: (a) rear→bounce_a with reflect, (b) bounce_a+1→bounce_b with reflect, (c) bounce_b-1→front with refract
+12. `check_aperture_at_plane()` — projects a ray to a z-plane and checks circular or n-gon aperture clip
+13. `refract_at_flat_plane()` — Snell's law at a flat surface with Fresnel transmittance
 
 Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel loss against on-axis transmission. When chromatic aberration is enabled, wavelength is sampled uniformly over 400–700nm with golden-ratio decorrelation for the aperture radius sample.
+
+### Ghost/Flare Simulation
+
+When `lens_ghosts` is enabled, a fraction of samples trace ghost paths instead of direct paths. This fraction is adaptive: `adaptive_frac = clamp(sqrt(ghost_total_weight) * ghost_intensity * 2.0, 0.02, 0.5)`, where `ghost_total_weight` is the sum of `R_a * R_b` across all valid pairs. Ghost pairs are enumerated from all surfaces with a Fresnel interface (non-stop, IOR-changing), and selected with probability proportional to `R_a * R_b`.
+
+- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * (ghost_total_weight / ghost_pair_weight) / adaptive_frac * ghost_intensity`, where `ghost_total_weight / ghost_pair_weight` is the inverse pdf (1/pdf) for the selected pair
+- Direct throughput (when ghosts active): `cos^4 * (T / onaxis_T) / (1 - adaptive_frac)`
+- Debug mode 4 ("Ghosts Only"): all samples trace ghost paths, direct rays suppressed
 
 ## Coordinate System
 
@@ -135,6 +156,8 @@ Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel lo
 - `is_curved_surface()` returns true for `SURFACE_SPHERICAL`, `SURFACE_ASPHERIC`, `SURFACE_CYLINDRICAL_X`, and `SURFACE_CYLINDRICAL_Y` — used for ABCD power and sphere-overlap logic
 - Focusing uses variable element spacing when patent data is available (`focus_close_distance > 0`), falling back to unit focusing (sensor-plane movement only) otherwise. The ABCD solve computes the correct sensor position for either case
 - Fresnel transmission is tracked per-surface and normalized against on-axis transmission for exposure compensation
+- Coating reflectance uses the Airy thin-film interference formula (quarter-wave MgF₂, nc=1.38, design λ=550nm) with wavelength and angle dependence. Single coating returns the film reflectance directly; multicoating applies a power-law (ratio³) clamped to bare Fresnel
+- Ghost sample allocation is adaptive: `clamp(sqrt(ghost_total_weight) * ghost_intensity * 2.0, 0.02, 0.5)` where `ghost_total_weight` is the sum of all `R_a × R_b` pair products. This gives ~37% for uncoated lenses (bright ghosts) down to ~6% for multicoated (dim ghosts)
 
 ## OSL Language Constraints (Blender/Cycles)
 
