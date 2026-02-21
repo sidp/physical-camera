@@ -132,10 +132,10 @@ Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel lo
 
 ### Ghost/Flare Simulation
 
-When `lens_ghosts` is enabled, a fraction (`ghost_fraction`, default 0.1) of samples trace ghost paths instead of direct paths. Ghost pairs are enumerated from all surfaces with a Fresnel interface (non-stop surfaces where IOR changes), excluding same-IOR boundaries. A random pair is selected per sample.
+When `lens_ghosts` is enabled, a fraction of samples trace ghost paths instead of direct paths. This fraction is adaptive: `adaptive_frac = clamp(sqrt(ghost_total_weight) * ghost_intensity * 2.0, 0.02, 0.5)`, where `ghost_total_weight` is the sum of `R_a * R_b` across all valid pairs. Ghost pairs are enumerated from all surfaces with a Fresnel interface (non-stop, IOR-changing), and selected with probability proportional to `R_a * R_b`.
 
-- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * num_pairs / ghost_fraction * ghost_intensity`
-- Direct throughput (when ghosts active): `cos^4 * (T / onaxis_T) / (1 - ghost_fraction)`
+- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * (ghost_total_weight / ghost_pair_weight) / adaptive_frac * ghost_intensity`, where `ghost_total_weight / ghost_pair_weight` is the inverse pdf (1/pdf) for the selected pair
+- Direct throughput (when ghosts active): `cos^4 * (T / onaxis_T) / (1 - adaptive_frac)`
 - Debug mode 4 ("Ghosts Only"): all samples trace ghost paths, direct rays suppressed
 
 ## Coordinate System
