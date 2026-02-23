@@ -10,14 +10,14 @@ coating = "single"
 radius = 35.473
 thickness = 2.099
 ior = 1.69895
-aperture = 71.92
+aperture = 35.96
 abbe_v = 30.1
 
 [[surface]]
 radius = 23.370
 thickness = 5.598
 ior = 1.69347
-aperture = 66.68
+aperture = 33.34
 abbe_v = 53.5
 
 # Air gap
@@ -25,7 +25,7 @@ abbe_v = 53.5
 radius = 67.786
 thickness = 0.100
 ior = 1.0
-aperture = 63.36
+aperture = 31.68
 abbe_v = 0.0
 
 # Front meniscus
@@ -33,7 +33,7 @@ abbe_v = 0.0
 radius = 23.708
 thickness = 9.278
 ior = 1.69895
-aperture = 57.44
+aperture = 28.72
 abbe_v = 30.1
 
 # Air gap to stop
@@ -41,7 +41,7 @@ abbe_v = 30.1
 radius = 15.175
 thickness = 5.016
 ior = 1.0
-aperture = 41.72
+aperture = 20.86
 abbe_v = 0.0
 
 # Aperture stop
@@ -50,7 +50,7 @@ type = "stop"
 radius = 0.0
 thickness = 11.380
 ior = 1.0
-aperture = 40.12
+aperture = 20.06
 abbe_v = 0.0
 
 # Rear meniscus
@@ -58,7 +58,7 @@ abbe_v = 0.0
 radius = -14.326
 thickness = 1.950
 ior = 1.76182
-aperture = 41.88
+aperture = 20.94
 abbe_v = 26.5
 
 # Air gap
@@ -66,7 +66,7 @@ abbe_v = 26.5
 radius = -18.831
 thickness = 0.200
 ior = 1.0
-aperture = 49.20
+aperture = 24.60
 abbe_v = 0.0
 
 # Rear element
@@ -74,7 +74,7 @@ abbe_v = 0.0
 radius = -89.104
 thickness = 6.029
 ior = 1.62041
-aperture = 60.76
+aperture = 30.38
 abbe_v = 60.3
 
 # Exit surface
@@ -82,5 +82,5 @@ abbe_v = 60.3
 radius = -22.062
 thickness = 0.0
 ior = 1.0
-aperture = 62.68
+aperture = 31.34
 abbe_v = 0.0

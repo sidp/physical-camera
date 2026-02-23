@@ -53,6 +53,7 @@ Focus distance is controlled through Blender's standard camera Depth of Field se
 - Petzval 85mm f/2.4
 - Sonnar 50mm f/1.5
 - Tessar 50mm f/2.8
+- Zeiss Planar 80mm f/2.8 (medium format)
 - Zuiko 18mm f/3.5 (internal focusing)
 
 ## Adding a Lens

@@ -36,7 +36,7 @@ There are two main parts:
 ## Adding a New Lens
 
 1. Create a new `.toml` file in `addon/lenses/` following the existing format
-2. Surface data uses the PBRT convention: radii of curvature in mm, positive = center of curvature toward the sensor
+2. Surface data uses the PBRT convention: radii of curvature in mm, positive = center of curvature toward the sensor. The `aperture` field is the full clear diameter in mm (the shader computes semi-aperture as `aperture * 0.5`). Note: PhotonsToPhotos labels its column "semi_diameter" but the values are actually full diameters — use them directly
 3. The aperture stop surface must have `type = "stop"` (radius=0, ior=1.0). Exactly one stop per lens is required
 4. Lens files are loaded alphabetically — the filename determines the enum order in the UI
 5. Regenerate lens diagram PNGs: `uv run scripts/build_diagrams.py`
