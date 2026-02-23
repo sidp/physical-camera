@@ -1081,6 +1081,56 @@ int trace_ghost_path(
     return 1;
 }
 
+// Aperture diffraction starburst via two-component mixture model.
+// Returns a weight multiplier and sets a transverse direction perturbation.
+// Core rays (most energy) pass through unperturbed; spike rays are deflected
+// along edge-perpendicular directions with Cauchy-sampled sinc² weighting.
+float apply_diffraction(
+    int num_blades, float blade_rot_rad, float lambda_nm,
+    float stop_diameter_mm, float hash1, float hash2, float hash3,
+    output vector perturbation)
+{
+    perturbation = vector(0, 0, 0);
+
+    if (num_blades < 3)
+        return 1.0;
+
+    int n = num_blades;
+    if (stop_diameter_mm < 1e-6)
+        return 1.0;
+    float theta0 = (lambda_nm * 1e-6) / (stop_diameter_mm * cos(M_PI / float(n)));
+
+    // spike_energy: fraction of PSF energy in diffraction spikes
+    float spike_energy = 0.5 * (1.0 - cos(M_PI / float(n)));
+
+    if (hash1 >= spike_energy)
+        return 1.0;
+
+    // Spike ray: select a random edge and sample along its perpendicular
+    int edge = int(floor(hash2 * float(n)));
+    if (edge >= n) edge = n - 1;
+    float spike_angle = blade_rot_rad + (float(edge) + 0.5) * 2.0 * M_PI / float(n) + M_PI * 0.5;
+
+    // Cauchy with scale 1/π importance-samples sinc² with near-flat weights:
+    // peak weight ~1.4 at u≈0.48, vs π≈3.14 with scale 1
+    float h3 = clamp(hash3, 1e-6, 1.0 - 1e-6);
+    float cauchy_u = tan(M_PI * (h3 - 0.5)) / M_PI;
+
+    float sinc_val;
+    if (abs(cauchy_u) < 1e-6) {
+        sinc_val = 1.0;
+    } else {
+        float piu = M_PI * cauchy_u;
+        sinc_val = sin(piu) / piu;
+        sinc_val *= sinc_val;
+    }
+    float weight = sinc_val * (1.0 + M_PI * M_PI * cauchy_u * cauchy_u);
+
+    float theta = cauchy_u * theta0;
+    perturbation = vector(cos(spike_angle) * theta, sin(spike_angle) * theta, 0.0);
+    return weight;
+}
+
 shader lens_camera(
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open." ]],
@@ -1096,6 +1146,8 @@ shader lens_camera(
         [[ string description = "Enable ghost/flare simulation (double-bounce reflections)." ]],
     float ghost_intensity = 1.0
         [[ string description = "Brightness multiplier for ghost images." ]],
+    int diffraction = 0
+        [[ string description = "Enable aperture diffraction (starburst spikes)." ]],
     float debug_mode = 0.0
         [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction, 4=ghosts only" ]],
     output point position = 0,
@@ -1506,6 +1558,23 @@ shader lens_camera(
         // Compensate for fewer direct samples when ghosts are active
         if (lens_ghosts && num_ghost_pairs > 0)
             w /= (1.0 - adaptive_frac);
+
+        // Aperture diffraction: perturb exit direction to produce starbursts
+        if (diffraction) {
+            float diff_h1 = sin(rnd[0] * 67.301 + rnd[1] * 131.729) * 39571.7;
+            diff_h1 = diff_h1 - floor(diff_h1);
+            float diff_h2 = sin(rnd[0] * 113.519 + rnd[1] * 29.853) * 51439.3;
+            diff_h2 = diff_h2 - floor(diff_h2);
+            float diff_h3 = sin(rnd[0] * 37.719 + rnd[1] * 83.461) * 63197.9;
+            diff_h3 = diff_h3 - floor(diff_h3);
+
+            vector diff_perturb = vector(0, 0, 0);
+            float diff_w = apply_diffraction(
+                aperture_blades, blade_rot_rad, lambda,
+                stop_semi_ap * 2.0, diff_h1, diff_h2, diff_h3, diff_perturb);
+            w *= diff_w;
+            exit_dir = normalize(exit_dir + diff_perturb);
+        }
 
         position = point(exit_origin[0] * 0.001,
                          exit_origin[1] * 0.001,
