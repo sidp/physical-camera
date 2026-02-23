@@ -1096,6 +1096,8 @@ float apply_diffraction(
         return 1.0;
 
     int n = num_blades;
+    if (stop_diameter_mm < 1e-6)
+        return 1.0;
     float theta0 = (lambda_nm * 1e-6) / (stop_diameter_mm * cos(M_PI / float(n)));
 
     // spike_energy: fraction of PSF energy in diffraction spikes
@@ -1111,8 +1113,8 @@ float apply_diffraction(
 
     // Cauchy with scale 1/π importance-samples sinc² with near-flat weights:
     // peak weight ~1.4 at u≈0.48, vs π≈3.14 with scale 1
-    float cauchy_u = tan(M_PI * (hash3 - 0.5)) / M_PI;
-    cauchy_u = clamp(cauchy_u, -50.0, 50.0);
+    float h3 = clamp(hash3, 1e-6, 1.0 - 1e-6);
+    float cauchy_u = tan(M_PI * (h3 - 0.5)) / M_PI;
 
     float sinc_val;
     if (abs(cauchy_u) < 1e-6) {
