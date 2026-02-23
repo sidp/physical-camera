@@ -64,6 +64,7 @@ def sync_to_cycles(cam):
     custom["chromatic_aberration"] = 1 if props.chromatic_aberration else 0
     custom["lens_ghosts"] = 1 if props.lens_ghosts else 0
     custom["ghost_intensity"] = props.ghost_intensity
+    custom["diffraction"] = 1 if props.diffraction else 0
 
     debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0}
     custom["debug_mode"] = debug_map[props.debug_mode]
@@ -148,6 +149,12 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
         max=100.0,
         default=1.0,
         precision=2,
+        update=_on_property_change,
+    )
+    diffraction: BoolProperty(
+        name="Diffraction",
+        description="Simulate aperture diffraction starbursts (polygonal apertures only)",
+        default=False,
         update=_on_property_change,
     )
     debug_mode: EnumProperty(
@@ -263,6 +270,7 @@ class CAMERA_PT_physical_lens(bpy.types.Panel):
         layout.prop(props, "lens_ghosts")
         if props.lens_ghosts:
             layout.prop(props, "ghost_intensity")
+        layout.prop(props, "diffraction")
         layout.prop(props, "debug_mode")
 
 
