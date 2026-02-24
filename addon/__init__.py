@@ -21,10 +21,6 @@ _lens_index_map: dict[str, int] = {}
 _osl_source: str = ""
 
 
-def _get_lens_items(self, context):
-    return _lens_items
-
-
 def _lens_index(props):
     idx = _lens_index_map.get(props.lens)
     if idx is not None:
@@ -100,11 +96,10 @@ def _on_property_change(self, context):
 
 
 class PhysicalCameraProperties(bpy.types.PropertyGroup):
-    lens: EnumProperty(
-        name="Lens",
-        items=_get_lens_items,
-        update=_on_lens_change,
-    )
+    # lens EnumProperty is registered dynamically in register() with a static
+    # items list so Blender stores the string identifier, not the integer index.
+    # A callback-based items= would store an integer that breaks when lenses are
+    # added or removed and the alphabetical order shifts.
     fstop: FloatProperty(
         name="f-stop",
         min=0.5,
@@ -329,6 +324,7 @@ def _on_load_post(_):
     for cam in bpy.data.cameras:
         if _is_using_physical_lens(cam):
             cam.custom_shader = text
+            sync_to_cycles(cam)
 
 
 def register():
@@ -347,6 +343,12 @@ def register():
     _lens_index_map = {
         lens["filename_stem"]: i for i, lens in enumerate(lenses)
     }
+
+    PhysicalCameraProperties.__annotations__["lens"] = EnumProperty(
+        name="Lens",
+        items=_lens_items,
+        update=_on_lens_change,
+    )
 
     diagram.load_previews(_lens_registry)
 

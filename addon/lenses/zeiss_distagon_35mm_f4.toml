@@ -1,0 +1,96 @@
+[lens]
+name = "Zeiss Distagon 35mm f/4"
+patent = "US Patent 3,038,380"
+focal_length = 35.0
+max_fstop = 4.0
+coating = "single"
+
+# Front cemented doublet
+[[surface]]
+radius = 24.81045
+thickness = 6.50615
+ior = 1.62041
+aperture = 24.70
+abbe_v = 60.3
+
+[[surface]]
+radius = -64.14030
+thickness = 1.30340
+ior = 1.51037
+aperture = 24.70
+abbe_v = 56.5
+
+[[surface]]
+radius = 10.02085
+thickness = 3.89970
+ior = 1.0
+aperture = 15.92
+abbe_v = 0.0
+
+# Front singlet
+[[surface]]
+radius = 33.56395
+thickness = 8.05805
+ior = 1.75520
+aperture = 12.80
+abbe_v = 27.5
+
+[[surface]]
+radius = 83.10470
+thickness = 1.57275
+ior = 1.0
+aperture = 11.22
+abbe_v = 0.0
+
+# Aperture stop
+[[surface]]
+type = "stop"
+radius = 0.0
+thickness = 3.70000
+ior = 1.0
+aperture = 8.300
+abbe_v = 0.0
+
+# Rear cemented triplet
+[[surface]]
+radius = -18.73865
+thickness = 2.60645
+ior = 1.65160
+aperture = 10.34
+abbe_v = 58.4
+
+[[surface]]
+radius = -7.46025
+thickness = 0.79590
+ior = 1.72339
+aperture = 11.68
+abbe_v = 38.0
+
+[[surface]]
+radius = 33.32420
+thickness = 4.33755
+ior = 1.66672
+aperture = 16.13
+abbe_v = 48.4
+
+[[surface]]
+radius = -14.99225
+thickness = 0.09940
+ior = 1.0
+aperture = 16.13
+abbe_v = 0.0
+
+# Rear singlet
+[[surface]]
+radius = -105.38325
+thickness = 2.16860
+ior = 1.69078
+aperture = 19.41
+abbe_v = 54.9
+
+[[surface]]
+radius = -23.93300
+thickness = 0.0
+ior = 1.0
+aperture = 19.41
+abbe_v = 0.0

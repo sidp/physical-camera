@@ -1,0 +1,119 @@
+[lens]
+name = "Mamiya 55mm f/2.8 N"
+patent = "JP 1979-107336"
+focal_length = 55.0
+max_fstop = 2.8
+coating = "multi"
+
+# Front negative meniscus
+[[surface]]
+radius = 41.067
+thickness = 2.500
+ior = 1.51633
+aperture = 41.94
+abbe_v = 64.1
+
+[[surface]]
+radius = 18.092
+thickness = 15.983
+ior = 1.0
+aperture = 32.91
+abbe_v = 0.0
+
+# Second singlet
+[[surface]]
+radius = -1933.250
+thickness = 5.402
+ior = 1.58144
+aperture = 30.04
+abbe_v = 40.7
+
+[[surface]]
+radius = -104.305
+thickness = 0.200
+ior = 1.0
+aperture = 30.04
+abbe_v = 0.0
+
+# Cemented doublet
+[[surface]]
+radius = 35.707
+thickness = 8.059
+ior = 1.77250
+aperture = 26.93
+abbe_v = 49.6
+
+[[surface]]
+radius = -25.816
+thickness = 5.020
+ior = 1.56732
+aperture = 26.93
+abbe_v = 42.8
+
+[[surface]]
+radius = 28.775
+thickness = 6.520
+ior = 1.0
+aperture = 23.06
+abbe_v = 0.0
+
+# Aperture stop
+[[surface]]
+type = "stop"
+radius = 0.0
+thickness = 2.783
+ior = 1.0
+aperture = 21.100
+abbe_v = 0.0
+
+# Rear singlet
+[[surface]]
+radius = -68.901
+thickness = 3.000
+ior = 1.69350
+aperture = 21.88
+abbe_v = 53.2
+
+[[surface]]
+radius = -28.569
+thickness = 1.200
+ior = 1.0
+aperture = 21.88
+abbe_v = 0.0
+
+# Rear cemented doublet
+[[surface]]
+radius = -18.823
+thickness = 1.500
+ior = 1.72342
+aperture = 20.98
+abbe_v = 38.0
+
+[[surface]]
+radius = 96.885
+thickness = 5.500
+ior = 1.51633
+aperture = 24.03
+abbe_v = 64.1
+
+[[surface]]
+radius = -22.796
+thickness = 0.200
+ior = 1.0
+aperture = 24.03
+abbe_v = 0.0
+
+# Rear singlet
+[[surface]]
+radius = -127.034
+thickness = 3.500
+ior = 1.69350
+aperture = 27.97
+abbe_v = 53.2
+
+[[surface]]
+radius = -40.796
+thickness = 0.0
+ior = 1.0
+aperture = 27.97
+abbe_v = 0.0

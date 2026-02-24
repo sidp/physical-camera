@@ -1,0 +1,74 @@
+[lens]
+name = "Mamiya 150mm f/4 Soft"
+patent = "JP 1977-141223"
+focal_length = 150.0
+max_fstop = 4.0
+coating = "multi"
+
+# Front cemented doublet
+[[surface]]
+radius = 51.72
+thickness = 13.815
+ior = 1.69350
+aperture = 46.58
+abbe_v = 53.3
+
+[[surface]]
+radius = -51.72
+thickness = 4.935
+ior = 1.60311
+aperture = 46.58
+abbe_v = 60.7
+
+[[surface]]
+radius = 219.29
+thickness = 6.465
+ior = 1.0
+aperture = 46.58
+abbe_v = 0.0
+
+# Negative singlet
+[[surface]]
+radius = -82.20
+thickness = 2.760
+ior = 1.67270
+aperture = 32.50
+abbe_v = 32.1
+
+[[surface]]
+radius = 49.17
+thickness = 7.935
+ior = 1.0
+aperture = 32.50
+abbe_v = 0.0
+
+# Aperture stop
+[[surface]]
+type = "stop"
+radius = 0.0
+thickness = 3.39
+ior = 1.0
+aperture = 29.625
+abbe_v = 0.0
+
+# Rear cemented doublet
+[[surface]]
+radius = 186.92
+thickness = 14.265
+ior = 1.73400
+aperture = 30.41
+abbe_v = 51.5
+
+[[surface]]
+radius = -17.51
+thickness = 5.325
+ior = 1.72000
+aperture = 30.41
+abbe_v = 50.2
+
+[[surface]]
+radius = -85.17
+thickness = 0.0
+ior = 1.0
+aperture = 38.90
+abbe_v = 0.0
