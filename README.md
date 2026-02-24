@@ -48,6 +48,7 @@ Focus distance is controlled through Blender's standard camera Depth of Field se
 - Double Gauss 50mm f/2
 - Double Gauss 100mm f/1.7
 - Mamiya 55mm f/2.8 N (medium format)
+- Mamiya 150mm f/4 Soft (medium format, soft focus)
 - Navarro Anamorphic 2x Cinema (anamorphic, aspheric)
 - Neil Front Anamorphic 2x Cinema (anamorphic, internal focusing)
 - Nikkor AI AF Fisheye 16mm f/2.8D (internal focusing)
