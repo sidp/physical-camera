@@ -367,6 +367,172 @@ void compute_field_exit_pupil(
         ep_r = 0.0;
 }
 
+// Per-pair ABCD trace through the full ghost path (all three phases including
+// reflections) to find the tightest aperture constraint projected back to the
+// aim plane. Returns a ghost-specific aim radius that replaces the main exit
+// pupil radius for ghost ray sampling.
+float compute_ghost_aim_radius(
+    int bounce_a, int bounce_b,
+    int num_surfaces,
+    float radii[MAX_SURFACES],
+    float iors[MAX_SURFACES],
+    float apertures[MAX_SURFACES],
+    int surface_types[MAX_SURFACES],
+    float vertex_z[MAX_SURFACES],
+    float aperture_scale,
+    float sensor_z, float aim_z, float aim_semi_ap)
+{
+    float Ax = 1.0, Bx = 0.0, Cx = 0.0, Dx = 1.0;
+    float Ay = 1.0, By = 0.0, Cy = 0.0, Dy = 1.0;
+
+    float prev_z = aim_z;
+    float cur_n = iors[num_surfaces - 1];
+    float result = aim_semi_ap;
+    float inv_sensor_aim = 1.0 / (sensor_z - aim_z);
+
+    // Phase 1: aim plane → bounce_a (step -1, reflect at bounce_a)
+    for (int i = num_surfaces - 1; i >= bounce_a; i--) {
+        // Transfer from prev_z to vertex_z[i]
+        float dist = vertex_z[i] - prev_z;
+        float t = dist / cur_n;
+        Ax += t * Cx;  Bx += t * Dx;
+        Ay += t * Cy;  By += t * Dy;
+
+        // Aperture constraint at this surface
+        float semi_ap = apertures[i] * 0.5;
+        if (surface_types[i] == SURFACE_STOP)
+            semi_ap *= aperture_scale;
+        float Meff_x = abs(Ax - Bx * inv_sensor_aim);
+        float Meff_y = abs(Ay - By * inv_sensor_aim);
+        float Meff = max(Meff_x, Meff_y);
+        if (Meff > 1e-10) {
+            float constraint = semi_ap / Meff;
+            if (constraint < result)
+                result = constraint;
+        }
+
+        // Power: refraction or reflection
+        if (i == bounce_a) {
+            // Reflection reverses the propagation direction, negating the
+            // reduced angle u = n*dh/dz. In ABCD terms this negates C and D.
+            // Curvature power is applied on top of the direction reversal.
+            Cx = -Cx;  Dx = -Dx;
+            Cy = -Cy;  Dy = -Dy;
+            if (is_curved_surface(surface_types[i]) && radii[i] != 0.0) {
+                float phi = 2.0 * cur_n / radii[i];
+                if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                    Cx -= phi * Ax;  Dx -= phi * Bx;
+                }
+                if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                    Cy -= phi * Ay;  Dy -= phi * By;
+                }
+            }
+        } else if (surface_types[i] != SURFACE_STOP) {
+            // Refraction (step -1): n_after = iors[i-1] or 1.0
+            float n_after = (i > 0) ? iors[i - 1] : 1.0;
+            if (is_curved_surface(surface_types[i]) && cur_n != n_after) {
+                float phi = (n_after - cur_n) / radii[i];
+                if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                    Cx -= phi * Ax;  Dx -= phi * Bx;
+                }
+                if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                    Cy -= phi * Ay;  Dy -= phi * By;
+                }
+            }
+            cur_n = n_after;
+        }
+
+        prev_z = vertex_z[i];
+    }
+
+    // Phase 2: bounce_a+1 → bounce_b (step +1, reflect at bounce_b)
+    for (int i = bounce_a + 1; i <= bounce_b; i++) {
+        float dist = vertex_z[i] - prev_z;
+        float t = dist / cur_n;
+        Ax += t * Cx;  Bx += t * Dx;
+        Ay += t * Cy;  By += t * Dy;
+
+        float semi_ap = apertures[i] * 0.5;
+        if (surface_types[i] == SURFACE_STOP)
+            semi_ap *= aperture_scale;
+        float Meff_x = abs(Ax - Bx * inv_sensor_aim);
+        float Meff_y = abs(Ay - By * inv_sensor_aim);
+        float Meff = max(Meff_x, Meff_y);
+        if (Meff > 1e-10) {
+            float constraint = semi_ap / Meff;
+            if (constraint < result)
+                result = constraint;
+        }
+
+        if (i == bounce_b) {
+            Cx = -Cx;  Dx = -Dx;
+            Cy = -Cy;  Dy = -Dy;
+            if (is_curved_surface(surface_types[i]) && radii[i] != 0.0) {
+                float phi = 2.0 * cur_n / radii[i];
+                if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                    Cx -= phi * Ax;  Dx -= phi * Bx;
+                }
+                if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                    Cy -= phi * Ay;  Dy -= phi * By;
+                }
+            }
+        } else if (surface_types[i] != SURFACE_STOP) {
+            // Refraction (step +1): n_after = iors[i]
+            float n_after = iors[i];
+            if (is_curved_surface(surface_types[i]) && cur_n != n_after) {
+                float phi = (n_after - cur_n) / radii[i];
+                if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                    Cx -= phi * Ax;  Dx -= phi * Bx;
+                }
+                if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                    Cy -= phi * Ay;  Dy -= phi * By;
+                }
+            }
+            cur_n = n_after;
+        }
+
+        prev_z = vertex_z[i];
+    }
+
+    // Phase 3: bounce_b-1 → 0 (step -1, refraction only)
+    for (int i = bounce_b - 1; i >= 0; i--) {
+        float dist = vertex_z[i] - prev_z;
+        float t = dist / cur_n;
+        Ax += t * Cx;  Bx += t * Dx;
+        Ay += t * Cy;  By += t * Dy;
+
+        float semi_ap = apertures[i] * 0.5;
+        if (surface_types[i] == SURFACE_STOP)
+            semi_ap *= aperture_scale;
+        float Meff_x = abs(Ax - Bx * inv_sensor_aim);
+        float Meff_y = abs(Ay - By * inv_sensor_aim);
+        float Meff = max(Meff_x, Meff_y);
+        if (Meff > 1e-10) {
+            float constraint = semi_ap / Meff;
+            if (constraint < result)
+                result = constraint;
+        }
+
+        if (surface_types[i] != SURFACE_STOP) {
+            float n_after = (i > 0) ? iors[i - 1] : 1.0;
+            if (is_curved_surface(surface_types[i]) && cur_n != n_after) {
+                float phi = (n_after - cur_n) / radii[i];
+                if (surface_types[i] != SURFACE_CYLINDRICAL_Y) {
+                    Cx -= phi * Ax;  Dx -= phi * Bx;
+                }
+                if (surface_types[i] != SURFACE_CYLINDRICAL_X) {
+                    Cy -= phi * Ay;  Dy -= phi * By;
+                }
+            }
+            cur_n = n_after;
+        }
+
+        prev_z = vertex_z[i];
+    }
+
+    return max(result, 0.0);
+}
+
 int intersect_sphere(
     point ray_origin,
     vector ray_dir,
@@ -1435,24 +1601,17 @@ shader lens_camera(
     }
 
     if (trace_ghost) {
-        // Pair-specific ghost aiming: project rear group apertures onto the
-        // aim plane — straight-line projection is only accurate for surfaces
-        // between the sensor and the stop. For front-group bounces, aim_semi_ap
-        // (ABCD-based) already encodes the stop constraint.
+        // ABCD ghost pupil: trace paraxial matrices through the full ghost
+        // path to find the tightest aperture constraint at the aim plane.
         // Circular sampling (not elliptical) allows anamorphic cylindrical
         // reflections to form vertical streaks.
-        float ghost_semi_ap = aim_semi_ap;
-        int proj_end = (ghost_a > stop_index) ? ghost_a : stop_index + 1;
-        float dist_to_aim = abs(sensor_z - aim_z);
-        for (int i = num_surfaces - 1; i >= proj_end; i--) {
-            float surf_semi_ap = apertures[i] * 0.5;
-            float dist_surf = abs(sensor_z - vertex_z[i]);
-            if (dist_surf > 1e-6) {
-                float projected = surf_semi_ap * dist_to_aim / dist_surf;
-                ghost_semi_ap = min(ghost_semi_ap, projected);
-            }
-        }
+        float ghost_semi_ap = compute_ghost_aim_radius(
+            ghost_a, ghost_b, num_surfaces,
+            radii, dispersed_iors, apertures, surface_types, vertex_z,
+            aperture_scale, sensor_z, aim_z, aim_semi_ap);
         ghost_semi_ap *= 1.1;
+        if (ghost_semi_ap > aim_semi_ap)
+            ghost_semi_ap = aim_semi_ap;
         float ghost_r = sqrt(r_param) * ghost_semi_ap;
         float ghost_angle = rnd[0] * 2.0 * M_PI;
         point ghost_aperture = point(ghost_r * cos(ghost_angle),
