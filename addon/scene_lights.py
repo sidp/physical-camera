@@ -17,18 +17,20 @@ def collect_lights(scene, camera_obj):
             continue
         light = obj.data
 
-        # Camera-space position/direction, then convert to lens space:
-        # meters→mm (*1000), negate z
+        # Camera-local position/direction to lens space: both use -z toward
+        # scene, so positions just scale by 1000 (no z flip). Sun directions
+        # are negated to store "toward source" instead of emission direction.
         cam_space = cam_inv @ obj.matrix_world
 
         if light.type == 'SUN':
-            # Sun emission direction is -Z in local space
             from mathutils import Vector
-            local_dir = cam_space.to_3x3() @ Vector((0, 0, -1))
-            dx = local_dir.x * 1000
-            dy = local_dir.y * 1000
-            dz = -local_dir.z * 1000
-            # Skip if pointing away from lens (behind camera)
+            emission_dir = cam_space.to_3x3() @ Vector((0, 0, -1))
+            # Negate to get "toward source" direction for the shader's
+            # theta = -dir_transverse / dir_z formula
+            dx = -emission_dir.x * 1000
+            dy = -emission_dir.y * 1000
+            dz = -emission_dir.z * 1000
+            # Skip if sun is behind camera (toward-source z would be positive)
             if dz >= 0:
                 continue
             lights.append({
@@ -43,7 +45,7 @@ def collect_lights(scene, camera_obj):
             pos = cam_space.translation
             px = pos.x * 1000
             py = pos.y * 1000
-            pz = -pos.z * 1000
+            pz = pos.z * 1000
             # Skip if behind rear vertex (can't enter lens)
             if pz > 0:
                 continue
