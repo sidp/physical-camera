@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from .lenses import MAX_SURFACES, load_lenses
-from .scene_lights import generate_load_scene_lights
 
 N_EXTRA = 8
 
@@ -152,5 +151,6 @@ def generate_osl(
 
 def inject_scene_lights(osl_source, lights=None):
     """Replace // {{SCENE_LIGHTS}} with generated light loader function."""
+    from .scene_lights import generate_load_scene_lights
     block = generate_load_scene_lights(lights or [])
     return osl_source.replace("// {{SCENE_LIGHTS}}", block)
