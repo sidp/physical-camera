@@ -1673,8 +1673,9 @@ shader lens_camera(
                         theta_y = light_pos[li * 3 + 1] * dz_inv;
                     }
 
-                    float hx = (theta_x - g_Dx * sensor_x * inv_sa) / denom_x;
-                    float hy = (theta_y - g_Dy * sensor_y * inv_sa) / denom_y;
+                    // Ghost rays exit toward -z, so u_exit = -theta
+                    float hx = (-theta_x - g_Dx * sensor_x * inv_sa) / denom_x;
+                    float hy = (-theta_y - g_Dy * sensor_y * inv_sa) / denom_y;
 
                     // Reject if aim point falls outside ghost aperture (1.5x margin
                     // for paraxial approximation error)
@@ -1748,7 +1749,10 @@ shader lens_camera(
             float ghost_angle = rnd[0] * 2.0 * M_PI;
             aim_x = ghost_r * cos(ghost_angle);
             aim_y = ghost_r * sin(ghost_angle);
-            if (num_lights > 0)
+            // Only compensate for the 30% allocation when this sample was
+            // actually drawn from the uniform pool (light_hash >= 0.7).
+            // Failed light-aiming attempts that fall back here use pdf_factor=1.
+            if (num_lights > 0 && light_hash >= 0.7)
                 pdf_factor = 1.0 / 0.3;
         }
 
