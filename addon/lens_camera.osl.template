@@ -1408,8 +1408,6 @@ float apply_diffraction(
 shader lens_camera(
     float aperture_scale = 1.0
         [[ string description = "Scale factor for the aperture stop opening. 1.0 = wide open." ]],
-    int lens_type = 0
-        [[ string description = "Lens selection index (see add-on UI for available lenses)." ]],
     int aperture_blades = 0
         [[ string description = "Number of aperture blades. 0 = circular." ]],
     float blade_rotation = 0.0
@@ -1469,7 +1467,7 @@ shader lens_camera(
     int num_surfaces = 0;
     float coating = 0.0;
     float squeeze = 1.0;
-    load_lens_data(lens_type, radii, thicknesses, iors, apertures, abbe_v,
+    load_lens_data(radii, thicknesses, iors, apertures, abbe_v,
                    surface_types, extra, thicknesses_close, focus_close_distance,
                    num_surfaces, coating, squeeze);
 
