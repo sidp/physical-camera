@@ -1650,7 +1650,9 @@ shader lens_camera(
             float dbg_denom_x = dbg_g_Cx - dbg_g_Dx * dbg_inv_sa;
             float dbg_denom_y = dbg_g_Cy - dbg_g_Dy * dbg_inv_sa;
 
-            if (abs(dbg_denom_x) > 1e-12 && abs(dbg_denom_y) > 1e-12) {
+            int dbg_valid_x = abs(dbg_denom_x) > 1e-12;
+            int dbg_valid_y = abs(dbg_denom_y) > 1e-12;
+            if (dbg_valid_x || dbg_valid_y) {
                 for (int li = 0; li < dbg_num_lights; li++) {
                     float theta_x = 0.0, theta_y = 0.0;
                     if (dbg_light_types[li] == 1) {
@@ -1665,8 +1667,8 @@ shader lens_camera(
                         theta_x = dbg_light_pos[li * 3 + 0] * dz_inv;
                         theta_y = dbg_light_pos[li * 3 + 1] * dz_inv;
                     }
-                    float hx = (-theta_x - dbg_g_Dx * sensor_x * dbg_inv_sa) / dbg_denom_x;
-                    float hy = (-theta_y - dbg_g_Dy * sensor_y * dbg_inv_sa) / dbg_denom_y;
+                    float hx = dbg_valid_x ? (-theta_x - dbg_g_Dx * sensor_x * dbg_inv_sa) / dbg_denom_x : 0.0;
+                    float hy = dbg_valid_y ? (-theta_y - dbg_g_Dy * sensor_y * dbg_inv_sa) / dbg_denom_y : 0.0;
                     if (sqrt(hx * hx + hy * hy) <= dbg_ghost_semi_ap * 1.5) {
                         dbg_g = 1.0;
                         break;
@@ -1716,12 +1718,20 @@ shader lens_camera(
         float inv_sa = 1.0 / (sensor_z - aim_z);
         float front_z = vertex_z[0];
 
+        // Pre-compute uniform aim point for degenerate-axis fallback
+        float ghost_r_u = sqrt(r_param) * ghost_semi_ap;
+        float ghost_angle_u = rnd[0] * 2.0 * M_PI;
+        float uniform_aim_x = ghost_r_u * cos(ghost_angle_u);
+        float uniform_aim_y = ghost_r_u * sin(ghost_angle_u);
+
         if (num_lights > 0 && ghost_semi_ap > 0.0 && light_hash < 0.7) {
             // ABCD inversion: map desired exit angle to aim-plane position
             float denom_x = g_Cx - g_Dx * inv_sa;
             float denom_y = g_Cy - g_Dy * inv_sa;
 
-            if (abs(denom_x) > 1e-12 && abs(denom_y) > 1e-12) {
+            int valid_x = abs(denom_x) > 1e-12;
+            int valid_y = abs(denom_y) > 1e-12;
+            if (valid_x || valid_y) {
                 // Compute per-light aim points and weights
                 float aim_weights[MAX_LIGHTS];
                 float aim_hx[MAX_LIGHTS];
@@ -1748,16 +1758,18 @@ shader lens_camera(
                     }
 
                     // Ghost rays exit toward -z, so u_exit = -theta
-                    float hx = (-theta_x - g_Dx * sensor_x * inv_sa) / denom_x;
-                    float hy = (-theta_y - g_Dy * sensor_y * inv_sa) / denom_y;
+                    // For degenerate axes (cylindrical ghost reflections),
+                    // check with 0 and store uniform fallback
+                    float hx = valid_x ? (-theta_x - g_Dx * sensor_x * inv_sa) / denom_x : 0.0;
+                    float hy = valid_y ? (-theta_y - g_Dy * sensor_y * inv_sa) / denom_y : 0.0;
 
                     // Reject if aim point falls outside ghost aperture (1.5x margin
                     // for paraxial approximation error)
                     if (sqrt(hx * hx + hy * hy) > ghost_semi_ap * 1.5)
                         continue;
 
-                    aim_hx[li] = hx;
-                    aim_hy[li] = hy;
+                    aim_hx[li] = valid_x ? hx : uniform_aim_x;
+                    aim_hy[li] = valid_y ? hy : uniform_aim_y;
                     aim_weights[li] = light_intensity[li];
                     aim_total += light_intensity[li];
                 }
@@ -1792,8 +1804,8 @@ shader lens_camera(
                                 if (d > 1.0)
                                     radius_angle = light_radius[sel] / d;
                             }
-                            float jitter_r_x = radius_angle / abs(denom_x);
-                            float jitter_r_y = radius_angle / abs(denom_y);
+                            float jitter_r_x = valid_x ? radius_angle / abs(denom_x) : 0.0;
+                            float jitter_r_y = valid_y ? radius_angle / abs(denom_y) : 0.0;
                             float jh = sin(rnd[0] * 53.811 + rnd[1] * 71.439) * 27613.9;
                             jh = jh - floor(jh);
                             float ja = rnd[1] * 2.0 * M_PI;
@@ -1819,10 +1831,8 @@ shader lens_camera(
 
         if (!use_light_aim) {
             // Uniform fallback
-            float ghost_r = sqrt(r_param) * ghost_semi_ap;
-            float ghost_angle = rnd[0] * 2.0 * M_PI;
-            aim_x = ghost_r * cos(ghost_angle);
-            aim_y = ghost_r * sin(ghost_angle);
+            aim_x = uniform_aim_x;
+            aim_y = uniform_aim_y;
             // Only compensate for the 30% allocation when this sample was
             // actually drawn from the uniform pool (light_hash >= 0.7).
             // Failed light-aiming attempts that fall back here use pdf_factor=1.
@@ -1851,9 +1861,13 @@ shader lens_camera(
 
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
             float frac = ghosts_only ? 1.0 : adaptive_frac;
+            // Ghost rays sample a smaller disk than direct rays — scale by
+            // the area ratio so ghosts contribute proportional étendue.
+            float area_ratio = (ghost_semi_ap * ghost_semi_ap)
+                             / (field_semi_ap_x * field_semi_ap_y);
             float w = weight * (ghost_T / onaxis_T)
                     * (ghost_total_weight / ghost_pair_weight) / frac * ghost_intensity
-                    * pdf_factor;
+                    * pdf_factor * area_ratio;
 
             position = point(ghost_exit[0] * 0.001,
                              ghost_exit[1] * 0.001,

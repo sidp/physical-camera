@@ -340,15 +340,9 @@ def _update_scene_lights(scene):
 @persistent
 def _on_load_post(_):
     """Update the shader text block and reassign to cameras after file load."""
-    global _osl_source
     if _TEXT_BLOCK_NAME not in bpy.data.texts:
         return
-    _osl_source = codegen.inject_scene_lights(_osl_source_base)
-    text = _get_or_create_text_block()
-    for cam in bpy.data.cameras:
-        if _is_using_physical_lens(cam):
-            cam.custom_shader = text
-            sync_to_cycles(cam)
+    _update_scene_lights(bpy.context.scene)
 
 
 @persistent
@@ -359,7 +353,7 @@ def _on_render_pre(_):
 
 @persistent
 def _on_depsgraph_update(scene, depsgraph):
-    """Re-inject scene lights when lights or camera move/change."""
+    """Re-inject scene lights when lights, emissive meshes, or camera change."""
     if _updating_lights:
         return
 
@@ -375,10 +369,17 @@ def _on_depsgraph_update(scene, depsgraph):
                                         or update.is_updated_shading):
                 needs_update = True
                 break
+            if uid.type == 'MESH' and (update.is_updated_transform
+                                       or update.is_updated_shading):
+                needs_update = True
+                break
             if uid == cam_obj and update.is_updated_transform:
                 needs_update = True
                 break
         elif isinstance(uid, bpy.types.Light):
+            needs_update = True
+            break
+        elif isinstance(uid, bpy.types.Material):
             needs_update = True
             break
 
