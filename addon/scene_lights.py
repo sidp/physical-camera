@@ -21,7 +21,7 @@ def collect_lights(scene):
     lights = []
 
     for obj in scene.objects:
-        if obj.type == 'LIGHT':
+        if obj.type == 'LIGHT' and obj.visible_camera:
             _collect_light_object(obj, lights)
         elif obj.type == 'MESH':
             _collect_emissive_mesh(obj, lights)
