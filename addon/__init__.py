@@ -98,7 +98,7 @@ def _on_property_change(self, context):
         sync_to_cycles(cam)
 
 
-def _on_ghost_toggle(self, context):
+def _on_light_feature_toggle(self, context):
     global _cached_light_key
     _cached_light_key = None
     cam = context.object.data if context.object else None
@@ -147,7 +147,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
     lens_ghosts: BoolProperty(
         name="Lens Ghosts",
         default=False,
-        update=_on_ghost_toggle,
+        update=_on_light_feature_toggle,
     )
     ghost_intensity: FloatProperty(
         name="Ghost Intensity",
@@ -163,7 +163,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
         name="Diffraction",
         description="Simulate aperture diffraction starbursts (polygonal apertures only)",
         default=False,
-        update=_on_property_change,
+        update=_on_light_feature_toggle,
     )
     debug_mode: EnumProperty(
         name="Debug Mode",
@@ -342,7 +342,8 @@ def _update_scene_lights(scene):
     cam_obj = scene.camera
     if cam_obj is None or not _is_using_physical_lens(cam_obj.data):
         lights = []
-    elif not cam_obj.data.physical_camera.lens_ghosts:
+    elif not (cam_obj.data.physical_camera.lens_ghosts
+              or cam_obj.data.physical_camera.diffraction):
         lights = []
     else:
         lights = scene_lights.collect_lights(scene)
