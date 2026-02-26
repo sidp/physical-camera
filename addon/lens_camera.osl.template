@@ -1599,6 +1599,18 @@ shader lens_camera(
     }
 
     float blade_rot_rad = blade_rotation * M_PI / 180.0;
+
+    // Load scene lights once for both ghost aiming and diffraction
+    int num_lights = 0;
+    int light_types[MAX_LIGHTS];
+    float light_pos[MAX_LIGHTS_3];
+    float light_dir[MAX_LIGHTS_3];
+    float light_intensity[MAX_LIGHTS];
+    float light_radius[MAX_LIGHTS];
+    load_scene_lights(num_lights, light_types, light_pos, light_dir,
+                      light_intensity, light_radius);
+    transform_lights_to_camera(num_lights, light_types, light_pos, light_dir);
+
     float ax = 0.0;
     float ay = 0.0;
 
@@ -1724,25 +1736,14 @@ shader lens_camera(
             dbg_Cx, dbg_Dx, dbg_Cy, dbg_Dy);
         dbg_semi_ap = min(dbg_semi_ap * 1.1, aim_semi_ap);
 
-        int dbg_num_lights = 0;
-        int dbg_light_types[MAX_LIGHTS];
-        float dbg_light_pos[MAX_LIGHTS_3];
-        float dbg_light_dir[MAX_LIGHTS_3];
-        float dbg_light_intensity[MAX_LIGHTS];
-        float dbg_light_radius[MAX_LIGHTS];
-        load_scene_lights(dbg_num_lights, dbg_light_types, dbg_light_pos,
-                          dbg_light_dir, dbg_light_intensity, dbg_light_radius);
-        transform_lights_to_camera(dbg_num_lights, dbg_light_types,
-                                   dbg_light_pos, dbg_light_dir);
-
         float dbg_g = 0.0;
-        if (dbg_num_lights > 0 && dbg_semi_ap > 0.0) {
+        if (num_lights > 0 && dbg_semi_ap > 0.0) {
             float dbg_hx[MAX_LIGHTS], dbg_hy[MAX_LIGHTS];
             float dbg_w[MAX_LIGHTS], dbg_total = 0.0;
             float dbg_dx = 0.0, dbg_dy = 0.0;
             if (compute_light_aim_points(
-                    dbg_num_lights, dbg_light_types, dbg_light_pos,
-                    dbg_light_dir, dbg_light_intensity,
+                    num_lights, light_types, light_pos,
+                    light_dir, light_intensity,
                     dbg_Cx, dbg_Dx, dbg_Cy, dbg_Dy,
                     sensor_x, sensor_y, sensor_z,
                     aim_z, dbg_semi_ap, vertex_z[0],
@@ -1751,7 +1752,7 @@ shader lens_camera(
                 dbg_g = 1.0;
         }
 
-        float dbg_r = float(dbg_num_lights) / float(MAX_LIGHTS);
+        float dbg_r = float(num_lights) / float(MAX_LIGHTS);
         throughput = color(dbg_r, dbg_g, 1.0);
         return;
     }
@@ -1769,18 +1770,6 @@ shader lens_camera(
             aperture_scale, sensor_z, aim_z, aim_semi_ap,
             g_Cx, g_Dx, g_Cy, g_Dy);
         ghost_semi_ap = min(ghost_semi_ap * 1.1, aim_semi_ap);
-
-        // Load scene lights for light-aimed ghost sampling
-        int num_lights = 0;
-        int light_types[MAX_LIGHTS];
-        float light_pos[MAX_LIGHTS_3];
-        float light_dir[MAX_LIGHTS_3];
-        float light_intensity[MAX_LIGHTS];
-        float light_radius[MAX_LIGHTS];
-        load_scene_lights(num_lights, light_types, light_pos, light_dir,
-                          light_intensity, light_radius);
-        transform_lights_to_camera(num_lights, light_types,
-                                   light_pos, light_dir);
 
         // 70/30 split: aim at lights vs uniform fallback
         float light_hash = rng(rnd[0], rnd[1], 3);
@@ -1980,18 +1969,161 @@ shader lens_camera(
         if (lens_ghosts && num_ghost_pairs > 0)
             w /= (1.0 - adaptive_frac);
 
-        // Aperture diffraction: perturb exit direction to produce starbursts
-        if (diffraction) {
+        // Aperture diffraction: perturb exit direction to produce starbursts.
+        // 70/30 mixture: aim spikes at scene lights vs Cauchy fallback.
+        if (diffraction && aperture_blades >= 3) {
+            int n = aperture_blades;
+            float stop_d = stop_semi_ap * 2.0;
+            if (stop_d < 1e-6) stop_d = 1e-6;
+            float theta0 = (lambda * 1e-6) / (stop_d * cos(M_PI / float(n)));
+            float theta0_perp = (lambda * 1e-6) / (stop_d * sin(M_PI / float(n)));
+
             float diff_h1 = rng(rnd[0], rnd[1], 6);
             float diff_h2 = rng(rnd[0], rnd[1], 7);
             float diff_h3 = rng(rnd[0], rnd[1], 8);
 
-            vector diff_perturb = vector(0, 0, 0);
-            float diff_w = apply_diffraction(
-                aperture_blades, blade_rot_rad, lambda,
-                stop_semi_ap * 2.0, diff_h1, diff_h2, diff_h3, diff_perturb);
-            w *= diff_w;
-            exit_dir = normalize(exit_dir + diff_perturb);
+            float spike_energy = 0.5 * (1.0 - cos(M_PI / float(n)));
+
+            if (diff_h1 < spike_energy) {
+                float aim_hash = rng(rnd[0], rnd[1], 9);
+                int use_aimed = 0;
+                vector diff_perturb = vector(0, 0, 0);
+                float diff_w = 1.0;
+
+                // Exit ray angular components (relative to optical axis)
+                float exit_ax = exit_dir[0] / (-exit_dir[2]);
+                float exit_ay = exit_dir[1] / (-exit_dir[2]);
+
+                if (num_lights > 0 && aim_hash < 0.7) {
+                    float theta_lx[MAX_LIGHTS], theta_ly[MAX_LIGHTS];
+                    float diff_aim_weights[MAX_LIGHTS];
+                    float diff_aim_total = 0.0;
+
+                    for (int li = 0; li < num_lights; li++) {
+                        diff_aim_weights[li] = 0.0;
+                        float tx = 0.0, ty = 0.0;
+
+                        if (light_types[li] == 1) {
+                            float ldz = light_dir[li * 3 + 2];
+                            if (ldz >= 0.0) continue;
+                            tx = -light_dir[li * 3 + 0] / ldz;
+                            ty = -light_dir[li * 3 + 1] / ldz;
+                        } else {
+                            float dx = light_pos[li * 3 + 0] - exit_origin[0];
+                            float dy = light_pos[li * 3 + 1] - exit_origin[1];
+                            float dz = light_pos[li * 3 + 2] - exit_origin[2];
+                            if (dz >= 0.0) continue;
+                            tx = dx / (-dz);
+                            ty = dy / (-dz);
+                        }
+                        // Relative to exit direction (diffraction PSF is centered there)
+                        theta_lx[li] = tx - exit_ax;
+                        theta_ly[li] = ty - exit_ay;
+                        diff_aim_weights[li] = light_intensity[li];
+                        diff_aim_total += light_intensity[li];
+                    }
+
+                    if (diff_aim_total > 0.0) {
+                        float sel_hash = rng(rnd[0], rnd[1], 10);
+                        float target = sel_hash * diff_aim_total;
+                        float cumul = 0.0;
+                        int sel = -1;
+                        for (int li = 0; li < num_lights; li++) {
+                            if (diff_aim_weights[li] <= 0.0) continue;
+                            cumul += diff_aim_weights[li];
+                            if (cumul >= target) { sel = li; break; }
+                        }
+                        // Guard against floating-point edge case where CDF
+                        // scan doesn't match — fall back to first valid light
+                        if (sel < 0) {
+                            for (int li = 0; li < num_lights; li++) {
+                                if (diff_aim_weights[li] > 0.0) { sel = li; break; }
+                            }
+                        }
+
+                        float lx = theta_lx[sel];
+                        float ly = theta_ly[sel];
+
+                        // Find spike edge closest to light direction
+                        int best_edge = 0;
+                        float best_dot = -1.0;
+                        float light_angle = atan2(ly, lx);
+                        for (int k = 0; k < n; k++) {
+                            float spike_a = blade_rot_rad
+                                          + (float(k) + 0.5) * 2.0 * M_PI / float(n)
+                                          + M_PI * 0.5;
+                            float d = abs(cos(spike_a - light_angle));
+                            if (d > best_dot) {
+                                best_dot = d;
+                                best_edge = k;
+                            }
+                        }
+
+                        float spike_a = blade_rot_rad
+                                      + (float(best_edge) + 0.5) * 2.0 * M_PI / float(n)
+                                      + M_PI * 0.5;
+                        float spike_cx = cos(spike_a);
+                        float spike_cy = sin(spike_a);
+
+                        // Project light onto spike-parallel / perpendicular axes
+                        float u_par = lx * spike_cx + ly * spike_cy;
+                        float u_perp = -lx * spike_cy + ly * spike_cx;
+
+                        // Jitter for extended light sources
+                        float light_r = light_radius[sel];
+                        if (light_types[sel] == 1) {
+                            // Sun radius is 0 in light data; use physical angular radius
+                            light_r = 0.00436;
+                        } else {
+                            float lpz = light_pos[sel * 3 + 2] - exit_origin[2];
+                            light_r = (abs(lpz) > 1e-6) ? light_r / abs(lpz) : 0.0;
+                        }
+                        float jh = rng(rnd[0], rnd[1], 11);
+                        float ja = diff_h2 * 2.0 * M_PI;
+                        float jr = sqrt(jh);
+                        u_par += jr * cos(ja) * light_r;
+                        u_perp += jr * sin(ja) * light_r;
+
+                        // 2D sinc² weight
+                        float sinc_par;
+                        float c_par = u_par / theta0;
+                        if (abs(c_par) < 1e-6) {
+                            sinc_par = 1.0;
+                        } else {
+                            float piu = M_PI * c_par;
+                            sinc_par = sin(piu) / piu;
+                            sinc_par *= sinc_par;
+                        }
+
+                        float sinc_perp;
+                        float c_perp = u_perp / theta0_perp;
+                        if (abs(c_perp) < 1e-6) {
+                            sinc_perp = 1.0;
+                        } else {
+                            float piu = M_PI * c_perp;
+                            sinc_perp = sin(piu) / piu;
+                            sinc_perp *= sinc_perp;
+                        }
+
+                        diff_perturb = vector(u_par * spike_cx - u_perp * spike_cy,
+                                              u_par * spike_cy + u_perp * spike_cx, 0.0);
+                        diff_w = sinc_par * sinc_perp * float(n) * diff_aim_total
+                               / (0.7 * light_intensity[sel]);
+                        use_aimed = 1;
+                    }
+                }
+
+                if (!use_aimed) {
+                    diff_w = apply_diffraction(
+                        aperture_blades, blade_rot_rad, lambda,
+                        stop_d, 0.0, diff_h2, diff_h3, diff_perturb);
+                    if (num_lights > 0)
+                        diff_w /= 0.3;
+                }
+
+                w *= diff_w;
+                exit_dir = normalize(exit_dir + diff_perturb);
+            }
         }
 
         position = point(exit_origin[0] * 0.001,
