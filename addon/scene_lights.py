@@ -1,79 +1,67 @@
-"""Collect scene lights and generate OSL loader function."""
+"""Collect scene lights and generate OSL loader function.
+
+Light positions and directions are stored in world space. The OSL shader
+transforms them to camera space at render time via transform("world",
+"camera", P), so camera movement does not trigger shader recompilation.
+"""
 
 MAX_LIGHTS = 16
 
 
-def collect_lights(scene, camera_obj):
-    """Collect lights from the scene, transformed to lens space.
+def collect_lights(scene):
+    """Collect lights from the scene in world space.
 
     Finds both Blender LIGHT objects and mesh objects with emissive
     materials (Emission shader or Principled BSDF with emission).
 
     Returns a list of dicts with keys: type (0=positional, 1=sun),
-    pos, dir, intensity, radius.
+    pos (world meters), dir (world-space toward-source for suns),
+    intensity, radius (mm).
     """
-    cam_inv = camera_obj.matrix_world.inverted()
     lights = []
 
     for obj in scene.objects:
         if obj.type == 'LIGHT':
-            _collect_light_object(obj, cam_inv, lights)
+            _collect_light_object(obj, lights)
         elif obj.type == 'MESH':
-            _collect_emissive_mesh(obj, cam_inv, lights)
+            _collect_emissive_mesh(obj, lights)
 
     lights.sort(key=lambda l: l["intensity"], reverse=True)
     return lights[:MAX_LIGHTS]
 
 
-def _collect_light_object(obj, cam_inv, lights):
+def _collect_light_object(obj, lights):
     light = obj.data
-
-    # Camera-local position/direction to lens space: both use -z toward
-    # scene, so positions just scale by 1000 (no z flip). Sun directions
-    # are negated to store "toward source" instead of emission direction.
-    cam_space = cam_inv @ obj.matrix_world
 
     if light.type == 'SUN':
         from mathutils import Vector
-        emission_dir = cam_space.to_3x3() @ Vector((0, 0, -1))
-        # Negate to get "toward source" direction for the shader's
-        # theta = -dir_transverse / dir_z formula.
-        # No mm scaling — directions are unitless (only ratios are used).
-        dx = -emission_dir.x
-        dy = -emission_dir.y
-        dz = -emission_dir.z
-        # Skip if sun is behind camera (toward-source z would be positive)
-        if dz >= 0:
-            return
+        emission_dir = obj.matrix_world.to_3x3() @ Vector((0, 0, -1))
+        # Negate to get "toward source" direction.
+        # Stored in world space; the shader transforms to camera space.
         lights.append({
             "type": 1,
             "pos": (0.0, 0.0, 0.0),
-            "dir": (dx, dy, dz),
+            "dir": (-emission_dir.x, -emission_dir.y, -emission_dir.z),
             "intensity": light.energy * _luminance(light.color),
             "radius": 0.0,
         })
     else:
-        # POINT, SPOT, AREA
-        pos = cam_space.translation
-        px = pos.x * 1000
-        py = pos.y * 1000
-        pz = pos.z * 1000
-        if pz > 0:
-            return
+        # POINT, SPOT, AREA — world-space position in meters
+        pos = obj.matrix_world.translation
         if light.type == 'AREA':
             radius = max(light.size, getattr(light, 'size_y', light.size)) * 1000
         else:
             radius = light.shadow_soft_size * 1000
         lights.append({
             "type": 0,
-            "pos": (px, py, pz),
+            "pos": (pos.x, pos.y, pos.z),
             "dir": (0.0, 0.0, 0.0),
             "intensity": light.energy * _luminance(light.color),
             "radius": radius,
         })
 
 
-def _collect_emissive_mesh(obj, cam_inv, lights):
+def _collect_emissive_mesh(obj, lights):
     """Check mesh materials for emission and add as a positional light."""
     emission = _get_mesh_emission(obj)
     if emission is None:
@@ -84,20 +72,13 @@ def _collect_emissive_mesh(obj, cam_inv, lights):
     if intensity <= 0.0:
         return
 
-    cam_pos = cam_inv @ obj.matrix_world.translation
-    px = cam_pos.x * 1000
-    py = cam_pos.y * 1000
-    pz = cam_pos.z * 1000
-    if pz > 0:
-        return
-
-    # Estimate radius from object dimensions (world-space bounding box)
+    pos = obj.matrix_world.translation
     dims = obj.dimensions
     radius = max(dims.x, dims.y, dims.z) * 0.5 * 1000
 
     lights.append({
         "type": 0,
-        "pos": (px, py, pz),
+        "pos": (pos.x, pos.y, pos.z),
         "dir": (0.0, 0.0, 0.0),
         "intensity": intensity,
         "radius": radius,

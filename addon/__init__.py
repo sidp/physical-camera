@@ -21,6 +21,7 @@ _lens_index_map: dict[str, int] = {}
 _osl_source: str = ""
 _osl_source_base: str = ""
 _updating_lights: bool = False
+_cached_light_key = None
 
 
 def _lens_index(props):
@@ -97,6 +98,16 @@ def _on_property_change(self, context):
         sync_to_cycles(cam)
 
 
+def _on_ghost_toggle(self, context):
+    global _cached_light_key
+    _cached_light_key = None
+    cam = context.object.data if context.object else None
+    if cam:
+        sync_to_cycles(cam)
+    if context.scene:
+        _update_scene_lights(context.scene)
+
+
 class PhysicalCameraProperties(bpy.types.PropertyGroup):
     # lens EnumProperty is registered dynamically in register() with a static
     # items list so Blender stores the string identifier, not the integer index.
@@ -136,7 +147,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
     lens_ghosts: BoolProperty(
         name="Lens Ghosts",
         default=False,
-        update=_on_property_change,
+        update=_on_ghost_toggle,
     )
     ghost_intensity: FloatProperty(
         name="Ghost Intensity",
@@ -318,13 +329,29 @@ def _draw_object_context_menu(self, context):
         self.layout.operator("camera.disable_physical_lens")
 
 
+def _lights_key(lights):
+    return tuple(
+        (lt['type'], lt['pos'], lt['dir'], lt['intensity'], lt['radius'])
+        for lt in lights
+    )
+
+
 def _update_scene_lights(scene):
     """Collect lights from scene and regenerate the shader text block."""
-    global _osl_source, _updating_lights
+    global _osl_source, _updating_lights, _cached_light_key
     cam_obj = scene.camera
-    lights = []
-    if cam_obj is not None and _is_using_physical_lens(cam_obj.data):
-        lights = scene_lights.collect_lights(scene, cam_obj)
+    if cam_obj is None or not _is_using_physical_lens(cam_obj.data):
+        lights = []
+    elif not cam_obj.data.physical_camera.lens_ghosts:
+        lights = []
+    else:
+        lights = scene_lights.collect_lights(scene)
+
+    key = _lights_key(lights)
+    if key == _cached_light_key:
+        return
+    _cached_light_key = key
+
     _osl_source = codegen.inject_scene_lights(_osl_source_base, lights)
     _updating_lights = True
     try:
@@ -340,6 +367,8 @@ def _update_scene_lights(scene):
 @persistent
 def _on_load_post(_):
     """Update the shader text block and reassign to cameras after file load."""
+    global _cached_light_key
+    _cached_light_key = None
     if _TEXT_BLOCK_NAME not in bpy.data.texts:
         return
     _update_scene_lights(bpy.context.scene)
@@ -353,12 +382,8 @@ def _on_render_pre(_):
 
 @persistent
 def _on_depsgraph_update(scene, depsgraph):
-    """Re-inject scene lights when lights, emissive meshes, or camera change."""
+    """Re-inject scene lights when lights or emissive meshes change."""
     if _updating_lights:
-        return
-
-    cam_obj = scene.camera
-    if cam_obj is None:
         return
 
     needs_update = False
@@ -373,9 +398,6 @@ def _on_depsgraph_update(scene, depsgraph):
                                        or update.is_updated_shading):
                 needs_update = True
                 break
-            if uid == cam_obj and update.is_updated_transform:
-                needs_update = True
-                break
         elif isinstance(uid, bpy.types.Light):
             needs_update = True
             break
@@ -385,6 +407,12 @@ def _on_depsgraph_update(scene, depsgraph):
 
     if needs_update:
         _update_scene_lights(scene)
+
+
+@persistent
+def _on_frame_change(scene, depsgraph):
+    """Update lights on frame change for animated lights."""
+    _update_scene_lights(scene)
 
 
 def register():
@@ -424,10 +452,12 @@ def register():
     bpy.app.handlers.load_post.append(_on_load_post)
     bpy.app.handlers.render_pre.append(_on_render_pre)
     bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update)
+    bpy.app.handlers.frame_change_post.append(_on_frame_change)
 
 
 def unregister():
     diagram.cleanup()
+    bpy.app.handlers.frame_change_post.remove(_on_frame_change)
     bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph_update)
     bpy.app.handlers.render_pre.remove(_on_render_pre)
     bpy.app.handlers.load_post.remove(_on_load_post)

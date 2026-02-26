@@ -2,6 +2,32 @@
 
 // {{SCENE_LIGHTS}}
 
+// Transform world-space light data to lens space.
+// Blender's "camera" space has +Z toward the scene; lens space has -Z,
+// so Z is negated (matching the output conversion: position.z = -lens_z).
+void transform_lights_to_camera(
+    int num_lights,
+    int light_types[MAX_LIGHTS],
+    float light_pos[MAX_LIGHTS_3],
+    float light_dir[MAX_LIGHTS_3])
+{
+    for (int li = 0; li < num_lights; li++) {
+        point wp = point(light_pos[li*3], light_pos[li*3+1], light_pos[li*3+2]);
+        point cp = transform("world", "camera", wp);
+        light_pos[li*3+0] = cp[0] * 1000.0;
+        light_pos[li*3+1] = cp[1] * 1000.0;
+        light_pos[li*3+2] = -cp[2] * 1000.0;
+
+        if (light_types[li] == 1) {
+            vector wd = vector(light_dir[li*3], light_dir[li*3+1], light_dir[li*3+2]);
+            vector cd = transform("world", "camera", wd);
+            light_dir[li*3+0] = cd[0];
+            light_dir[li*3+1] = cd[1];
+            light_dir[li*3+2] = -cd[2];
+        }
+    }
+}
+
 // Integer hash: decorrelated random values from the two camera random
 // samples. Each salt value yields an independent uniform [0,1] variate.
 float rng(float a, float b, int salt)
@@ -1706,6 +1732,8 @@ shader lens_camera(
         float dbg_light_radius[MAX_LIGHTS];
         load_scene_lights(dbg_num_lights, dbg_light_types, dbg_light_pos,
                           dbg_light_dir, dbg_light_intensity, dbg_light_radius);
+        transform_lights_to_camera(dbg_num_lights, dbg_light_types,
+                                   dbg_light_pos, dbg_light_dir);
 
         float dbg_g = 0.0;
         if (dbg_num_lights > 0 && dbg_semi_ap > 0.0) {
@@ -1751,6 +1779,8 @@ shader lens_camera(
         float light_radius[MAX_LIGHTS];
         load_scene_lights(num_lights, light_types, light_pos, light_dir,
                           light_intensity, light_radius);
+        transform_lights_to_camera(num_lights, light_types,
+                                   light_pos, light_dir);
 
         // 70/30 split: aim at lights vs uniform fallback
         float light_hash = rng(rnd[0], rnd[1], 3);
