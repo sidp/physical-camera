@@ -11,11 +11,17 @@ _COATING_VALUES = {"none": 0.0, "single": 1.0, "multi": 2.0}
 _TYPE_VALUES = {"spherical": 0, "flat": 1, "stop": 2, "aspheric": 3, "cylindrical_x": 4, "cylindrical_y": 5}
 
 
+def _has_aspheric_data(surface: dict) -> bool:
+    if surface.get("conic", 0.0) != 0.0:
+        return True
+    coeffs = surface.get("aspheric_coeffs", [])
+    return any(c != 0.0 for c in coeffs)
+
+
 def _format_surface_assignments(
     surfaces: list[dict], surface_types: list[str], focus: dict | None
 ) -> str:
     """Generate OSL assignment lines for one lens's surface data."""
-    # Build close-focus thickness lookup from focus data
     close_thicknesses = {}
     if focus is not None:
         for v in focus["variables"]:
@@ -40,52 +46,42 @@ def _format_surface_assignments(
         lines.append(
             f"    surface_types[{i}] = {_TYPE_VALUES[st]};"
         )
-    lines.append("")
-    for i, s in enumerate(surfaces):
-        base = i * N_EXTRA
-        k = s.get("conic", 0.0)
-        coeffs = s.get("aspheric_coeffs", [0.0, 0.0, 0.0])
-        a10 = coeffs[3] if len(coeffs) >= 4 else 0.0
-        lines.append(
-            f"    extra[{base}] = {k};  "
-            f"extra[{base + 1}] = {coeffs[0]};  "
-            f"extra[{base + 2}] = {coeffs[1]};  "
-            f"extra[{base + 3}] = {coeffs[2]};"
-        )
-        lines.append(
-            f"    extra[{base + 4}] = {a10};  "
-            f"extra[{base + 5}] = 0.0;  "
-            f"extra[{base + 6}] = 0.0;  "
-            f"extra[{base + 7}] = 0.0;"
-        )
+
+    # Only emit extra[] entries for surfaces with aspheric data;
+    # OSL zero-initializes local arrays so non-aspheric surfaces
+    # already have the correct default values.
+    aspheric_surfaces = [
+        (i, s) for i, s in enumerate(surfaces) if _has_aspheric_data(s)
+    ]
+    if aspheric_surfaces:
+        lines.append("")
+        for i, s in aspheric_surfaces:
+            base = i * N_EXTRA
+            k = s.get("conic", 0.0)
+            coeffs = s.get("aspheric_coeffs", [0.0, 0.0, 0.0])
+            a10 = coeffs[3] if len(coeffs) >= 4 else 0.0
+            lines.append(
+                f"    extra[{base}] = {k};  "
+                f"extra[{base + 1}] = {coeffs[0]};  "
+                f"extra[{base + 2}] = {coeffs[1]};  "
+                f"extra[{base + 3}] = {coeffs[2]};  "
+                f"extra[{base + 4}] = {a10};"
+            )
+
     return "\n".join(lines)
 
 
 def _generate_load_lens_data(lens: dict) -> str:
-    """Generate the #define and load_lens_data() function for a single lens."""
-    max_extra = MAX_SURFACES * N_EXTRA
+    """Generate per-lens #defines and the load_lens_data() function body."""
     coating_val = _COATING_VALUES[lens["coating"]]
     focus = lens.get("focus")
     close_dist = focus["close_distance"] if focus else 0.0
 
     lines = [
-        f"#define MAX_SURFACES {MAX_SURFACES}",
-        f"#define N_EXTRA {N_EXTRA}",
-        f"#define MAX_EXTRA {max_extra}",
-        "",
-        "#define SURFACE_SPHERICAL     0",
-        "#define SURFACE_FLAT          1",
-        "#define SURFACE_STOP          2",
-        "#define SURFACE_ASPHERIC      3",
-        "#define SURFACE_CYLINDRICAL_X 4",
-        "#define SURFACE_CYLINDRICAL_Y 5",
-        "",
-        "// extra[i*N_EXTRA + 0] = k (conic constant)",
-        "// extra[i*N_EXTRA + 1] = A4 (4th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 2] = A6 (6th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 3] = A8 (8th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 4] = A10 (10th-order aspheric coefficient)",
-        "// extra[i*N_EXTRA + 5..7] = reserved",
+        f"#define NUM_SURFACES {len(lens['surfaces'])}",
+        f"#define COATING {coating_val}",
+        f"#define SQUEEZE {float(lens['squeeze'])}",
+        f"#define FOCUS_CLOSE_DISTANCE {close_dist}",
         "",
         "void load_lens_data(",
         "    output float radii[MAX_SURFACES],",
@@ -95,17 +91,9 @@ def _generate_load_lens_data(lens: dict) -> str:
         "    output float abbe_v[MAX_SURFACES],",
         "    output int surface_types[MAX_SURFACES],",
         "    output float extra[MAX_EXTRA],",
-        "    output float thicknesses_close[MAX_SURFACES],",
-        "    output float focus_close_distance,",
-        "    output int num_surfaces,",
-        "    output float coating,",
-        "    output float squeeze)",
+        "    output float thicknesses_close[MAX_SURFACES])",
         "{",
         f"    // {lens['name']}",
-        f"    num_surfaces = {len(lens['surfaces'])};",
-        f"    coating = {coating_val};",
-        f"    squeeze = {float(lens['squeeze'])};",
-        f"    focus_close_distance = {close_dist};",
         _format_surface_assignments(
             lens["surfaces"], lens["surface_types"], focus
         ),
