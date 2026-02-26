@@ -2072,6 +2072,7 @@ shader lens_camera(
                         // Jitter for extended light sources
                         float light_r = light_radius[sel];
                         if (light_types[sel] == 1) {
+                            // Sun radius is 0 in light data; use physical angular radius
                             light_r = 0.00436;
                         } else {
                             float lpz = light_pos[sel * 3 + 2] - exit_origin[2];
