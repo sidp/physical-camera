@@ -64,7 +64,7 @@ def sync_to_cycles(cam):
     custom["ghost_intensity"] = props.ghost_intensity
     custom["diffraction"] = 1 if props.diffraction else 0
 
-    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0}
+    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0, "GHOST_AIM": 5.0}
     custom["debug_mode"] = debug_map[props.debug_mode]
 
     if lens_index < len(_lens_registry):
@@ -162,6 +162,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
             ("DIAGNOSTIC", "Diagnostic", "Failure cause visualization"),
             ("EXIT_DIR", "Exit Direction", "Exit ray direction as RGB"),
             ("GHOSTS_ONLY", "Ghosts Only", "Show only ghost reflections"),
+            ("GHOST_AIM", "Ghost Aim", "Light-aimed ghost diagnostic"),
         ],
         default="NORMAL",
         update=_on_property_change,

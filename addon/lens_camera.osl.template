@@ -1321,7 +1321,7 @@ shader lens_camera(
     int diffraction = 0
         [[ string description = "Enable aperture diffraction (starburst spikes)." ]],
     float debug_mode = 0.0
-        [[ string description = "0=normal, 1=pinhole, 2=surface count, 3=exit direction, 4=ghosts only" ]],
+        [[ string description = "0=normal, 1=pinhole, 2=diagnostic, 3=exit dir, 4=ghosts only, 5=ghost aim" ]],
     output point position = 0,
     output vector direction = 0,
     output color throughput = 1)
@@ -1603,6 +1603,80 @@ shader lens_camera(
     // Debug mode 4: ghosts only — kill direct rays
     if (debug_mode >= 3.5 && debug_mode < 4.5 && !trace_ghost) {
         throughput = 0.0;
+        return;
+    }
+
+    // Debug mode 5: ghost aim diagnostic
+    // Flat image showing light-aiming pipeline stages.
+    // R = num_lights / MAX_LIGHTS (brightness = lights found)
+    // G = light aiming succeeded for this sample
+    // B = ghost pair was selected (trace_ghost)
+    // Black pixel = no ghost pair selected
+    if (debug_mode >= 4.5 && debug_mode < 5.5) {
+        position = point(0, 0, 0);
+        direction = normalize(vector(-sensor_x, -sensor_y, 50.0));
+
+        if (!trace_ghost) {
+            throughput = 0.0;
+            return;
+        }
+
+        // Run the same light-loading and aiming logic to see what happens
+        float dbg_g_Cx = 0.0, dbg_g_Dx = 0.0, dbg_g_Cy = 0.0, dbg_g_Dy = 0.0;
+        float dbg_ghost_semi_ap = compute_ghost_aim_radius(
+            ghost_a, ghost_b, num_surfaces,
+            radii, dispersed_iors, apertures, surface_types, vertex_z,
+            aperture_scale, sensor_z, aim_z, aim_semi_ap,
+            dbg_g_Cx, dbg_g_Dx, dbg_g_Cy, dbg_g_Dy);
+        dbg_ghost_semi_ap *= 1.1;
+        if (dbg_ghost_semi_ap > aim_semi_ap)
+            dbg_ghost_semi_ap = aim_semi_ap;
+
+        int dbg_num_lights = 0;
+        int dbg_light_types[MAX_LIGHTS];
+        float dbg_light_pos[MAX_LIGHTS_3];
+        float dbg_light_dir[MAX_LIGHTS_3];
+        float dbg_light_intensity[MAX_LIGHTS];
+        float dbg_light_radius[MAX_LIGHTS];
+        load_scene_lights(dbg_num_lights, dbg_light_types, dbg_light_pos,
+                          dbg_light_dir, dbg_light_intensity, dbg_light_radius);
+
+        float dbg_r = float(dbg_num_lights) / float(MAX_LIGHTS);
+
+        // Try ABCD inversion for each light to count valid ones
+        float dbg_g = 0.0;
+        if (dbg_num_lights > 0 && dbg_ghost_semi_ap > 0.0) {
+            float dbg_inv_sa = 1.0 / (sensor_z - aim_z);
+            float dbg_denom_x = dbg_g_Cx - dbg_g_Dx * dbg_inv_sa;
+            float dbg_denom_y = dbg_g_Cy - dbg_g_Dy * dbg_inv_sa;
+
+            if (abs(dbg_denom_x) > 1e-12 && abs(dbg_denom_y) > 1e-12) {
+                for (int li = 0; li < dbg_num_lights; li++) {
+                    float theta_x = 0.0, theta_y = 0.0;
+                    if (dbg_light_types[li] == 1) {
+                        float ldz = dbg_light_dir[li * 3 + 2];
+                        if (ldz >= 0.0) continue;
+                        theta_x = -dbg_light_dir[li * 3 + 0] / ldz;
+                        theta_y = -dbg_light_dir[li * 3 + 1] / ldz;
+                    } else {
+                        float lpz = dbg_light_pos[li * 3 + 2];
+                        if (lpz >= vertex_z[0]) continue;
+                        float dz_inv = 1.0 / (vertex_z[0] - lpz);
+                        theta_x = dbg_light_pos[li * 3 + 0] * dz_inv;
+                        theta_y = dbg_light_pos[li * 3 + 1] * dz_inv;
+                    }
+                    float hx = (-theta_x - dbg_g_Dx * sensor_x * dbg_inv_sa) / dbg_denom_x;
+                    float hy = (-theta_y - dbg_g_Dy * sensor_y * dbg_inv_sa) / dbg_denom_y;
+                    if (sqrt(hx * hx + hy * hy) <= dbg_ghost_semi_ap * 1.5) {
+                        dbg_g = 1.0;
+                        break;
+                    }
+                }
+            }
+        }
+
+        float dbg_b = 1.0;
+        throughput = color(dbg_r, dbg_g, dbg_b);
         return;
     }
 
