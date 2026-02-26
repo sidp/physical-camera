@@ -11,7 +11,7 @@ from bpy.props import (
     IntProperty,
 )
 
-from . import codegen, diagram
+from . import codegen, diagram, scene_lights
 
 _TEXT_BLOCK_NAME = "Physical Lens OSL"
 
@@ -19,6 +19,9 @@ _lens_registry: list[dict] = []
 _lens_items: list[tuple] = []
 _lens_index_map: dict[str, int] = {}
 _osl_source: str = ""
+_osl_source_base: str = ""
+_updating_lights: bool = False
+_cached_light_key = None
 
 
 def _lens_index(props):
@@ -62,7 +65,7 @@ def sync_to_cycles(cam):
     custom["ghost_intensity"] = props.ghost_intensity
     custom["diffraction"] = 1 if props.diffraction else 0
 
-    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0}
+    debug_map = {"NORMAL": 0.0, "PINHOLE": 1.0, "DIAGNOSTIC": 2.0, "EXIT_DIR": 3.0, "GHOSTS_ONLY": 4.0, "GHOST_AIM": 5.0}
     custom["debug_mode"] = debug_map[props.debug_mode]
 
     if lens_index < len(_lens_registry):
@@ -93,6 +96,16 @@ def _on_property_change(self, context):
     cam = context.object.data if context.object else None
     if cam:
         sync_to_cycles(cam)
+
+
+def _on_ghost_toggle(self, context):
+    global _cached_light_key
+    _cached_light_key = None
+    cam = context.object.data if context.object else None
+    if cam:
+        sync_to_cycles(cam)
+    if context.scene:
+        _update_scene_lights(context.scene)
 
 
 class PhysicalCameraProperties(bpy.types.PropertyGroup):
@@ -134,7 +147,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
     lens_ghosts: BoolProperty(
         name="Lens Ghosts",
         default=False,
-        update=_on_property_change,
+        update=_on_ghost_toggle,
     )
     ghost_intensity: FloatProperty(
         name="Ghost Intensity",
@@ -160,6 +173,7 @@ class PhysicalCameraProperties(bpy.types.PropertyGroup):
             ("DIAGNOSTIC", "Diagnostic", "Failure cause visualization"),
             ("EXIT_DIR", "Exit Direction", "Exit ray direction as RGB"),
             ("GHOSTS_ONLY", "Ghosts Only", "Show only ghost reflections"),
+            ("GHOST_AIM", "Ghost Aim", "Light-aimed ghost diagnostic"),
         ],
         default="NORMAL",
         update=_on_property_change,
@@ -315,27 +329,103 @@ def _draw_object_context_menu(self, context):
         self.layout.operator("camera.disable_physical_lens")
 
 
+def _lights_key(lights):
+    return tuple(
+        (lt['type'], lt['pos'], lt['dir'], lt['intensity'], lt['radius'])
+        for lt in lights
+    )
+
+
+def _update_scene_lights(scene):
+    """Collect lights from scene and regenerate the shader text block."""
+    global _osl_source, _updating_lights, _cached_light_key
+    cam_obj = scene.camera
+    if cam_obj is None or not _is_using_physical_lens(cam_obj.data):
+        lights = []
+    elif not cam_obj.data.physical_camera.lens_ghosts:
+        lights = []
+    else:
+        lights = scene_lights.collect_lights(scene)
+
+    key = _lights_key(lights)
+    if key == _cached_light_key:
+        return
+    _cached_light_key = key
+
+    _osl_source = codegen.inject_scene_lights(_osl_source_base, lights)
+    _updating_lights = True
+    try:
+        text = _get_or_create_text_block()
+        for cam in bpy.data.cameras:
+            if _is_using_physical_lens(cam):
+                cam.custom_shader = text
+                sync_to_cycles(cam)
+    finally:
+        _updating_lights = False
+
+
 @persistent
 def _on_load_post(_):
     """Update the shader text block and reassign to cameras after file load."""
+    global _cached_light_key
+    _cached_light_key = None
     if _TEXT_BLOCK_NAME not in bpy.data.texts:
         return
-    text = _get_or_create_text_block()
-    for cam in bpy.data.cameras:
-        if _is_using_physical_lens(cam):
-            cam.custom_shader = text
-            sync_to_cycles(cam)
+    _update_scene_lights(bpy.context.scene)
+
+
+@persistent
+def _on_render_pre(_):
+    """Inject scene light positions into the shader before each frame."""
+    _update_scene_lights(bpy.context.scene)
+
+
+@persistent
+def _on_depsgraph_update(scene, depsgraph):
+    """Re-inject scene lights when lights or emissive meshes change."""
+    if _updating_lights:
+        return
+
+    needs_update = False
+    for update in depsgraph.updates:
+        uid = update.id
+        if isinstance(uid, bpy.types.Object):
+            if uid.type == 'LIGHT' and (update.is_updated_transform
+                                        or update.is_updated_shading):
+                needs_update = True
+                break
+            if uid.type == 'MESH' and (update.is_updated_transform
+                                       or update.is_updated_shading):
+                needs_update = True
+                break
+        elif isinstance(uid, bpy.types.Light):
+            needs_update = True
+            break
+        elif isinstance(uid, bpy.types.Material):
+            needs_update = True
+            break
+
+    if needs_update:
+        _update_scene_lights(scene)
+
+
+@persistent
+def _on_frame_change(scene, depsgraph):
+    """Update lights on frame change for animated lights."""
+    _update_scene_lights(scene)
 
 
 def register():
     global _lens_registry, _lens_items, _lens_index_map, _osl_source
+    global _osl_source_base
 
     addon_dir = Path(__file__).parent
     template_path = addon_dir / "lens_camera.osl.template"
     lens_dir = addon_dir / "lenses"
 
-    osl_source, lenses = codegen.generate_osl(template_path, lens_dir)
-    _osl_source = osl_source
+    osl_source_base, lenses = codegen.generate_osl(template_path, lens_dir)
+    _osl_source_base = osl_source_base
+    _osl_source = codegen.inject_scene_lights(_osl_source_base)
     _lens_registry = lenses
     _lens_items = [
         (lens["filename_stem"], lens["name"], "") for lens in lenses
@@ -360,10 +450,16 @@ def register():
     )
     bpy.types.OUTLINER_MT_object.append(_draw_object_context_menu)
     bpy.app.handlers.load_post.append(_on_load_post)
+    bpy.app.handlers.render_pre.append(_on_render_pre)
+    bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update)
+    bpy.app.handlers.frame_change_post.append(_on_frame_change)
 
 
 def unregister():
     diagram.cleanup()
+    bpy.app.handlers.frame_change_post.remove(_on_frame_change)
+    bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph_update)
+    bpy.app.handlers.render_pre.remove(_on_render_pre)
     bpy.app.handlers.load_post.remove(_on_load_post)
     bpy.types.OUTLINER_MT_object.remove(_draw_object_context_menu)
     del bpy.types.Camera.physical_camera
