@@ -37,10 +37,11 @@ def _collect_light_object(obj, cam_inv, lights):
         from mathutils import Vector
         emission_dir = cam_space.to_3x3() @ Vector((0, 0, -1))
         # Negate to get "toward source" direction for the shader's
-        # theta = -dir_transverse / dir_z formula
-        dx = -emission_dir.x * 1000
-        dy = -emission_dir.y * 1000
-        dz = -emission_dir.z * 1000
+        # theta = -dir_transverse / dir_z formula.
+        # No mm scaling — directions are unitless (only ratios are used).
+        dx = -emission_dir.x
+        dy = -emission_dir.y
+        dz = -emission_dir.z
         # Skip if sun is behind camera (toward-source z would be positive)
         if dz >= 0:
             return

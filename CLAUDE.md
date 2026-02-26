@@ -20,7 +20,7 @@ Performance and code architecture are secondary but important constraints:
 There are two main parts:
 
 ### OSL Shader (`addon/lens_camera.osl.template`)
-- The template has a `// {{LENS_DATA}}` placeholder that gets replaced with generated lens data at addon registration time
+- The template has `// {{LENS_DATA}}` and `// {{SCENE_LIGHTS}}` placeholders that get replaced with generated code at addon registration time and on depsgraph updates
 - The shader implements backward ray tracing (sensor → scene) through a multi-surface lens system using ABCD matrix optics for focus computation and exit pupil aiming
 - Surfaces are listed front-to-back but traced rear-to-front (sensor side first)
 - `MAX_SURFACES` is defined as 36 — any new lens must fit within this limit
@@ -28,7 +28,8 @@ There are two main parts:
 ### Blender Addon (`addon/`)
 - `__init__.py` — Registers the Blender extension: properties, operators, UI panel in Camera Properties. On register, calls `codegen.generate_osl()` to produce the final OSL source and stores it in a Blender text datablock
 - `lenses.py` — Reads TOML lens files from `addon/lenses/` into dicts (no bpy dependency, shared by the build script). Infers a `surface_types` list per lens (`"spherical"`, `"flat"`, `"stop"`, `"aspheric"`, `"cylindrical_x"`, `"cylindrical_y"`)
-- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template. Emits `surface_types[]`, `extra[]`, `thicknesses_close[]` arrays, `focus_close_distance`, `squeeze`, and `SURFACE_*` type constants
+- `codegen.py` — Generates the `load_lens_data()` function and injects it into the OSL template. Emits `surface_types[]`, `extra[]`, `thicknesses_close[]` arrays, `focus_close_distance`, `squeeze`, and `SURFACE_*` type constants. Also injects `load_scene_lights()` via `inject_scene_lights()`
+- `scene_lights.py` — Collects Blender LIGHT objects and emissive meshes, transforms them to lens space, and generates the `load_scene_lights()` OSL function. Positions are in mm (lens space); sun directions are unitless (only ratios matter). Up to `MAX_LIGHTS` (16) lights sorted by intensity
 - `diagram.py` — Loads pre-rendered lens diagram PNGs from `addon/previews/` as Blender preview icons
 - `addon/lenses/*.toml` — Lens prescriptions in TOML format. Each file defines `[lens]` metadata (name, focal_length, max_fstop, optional squeeze), `[[surface]]` entries (radius, thickness, ior, aperture, abbe_v), and an optional `[focus]` section for variable element spacing. The aperture stop surface must have `type = "stop"`. Aspheric surfaces use `type = "aspheric"` with `conic` and `aspheric_coeffs` fields. Cylindrical surfaces use `type = "cylindrical_x"` (curvature in X only) or `type = "cylindrical_y"` (curvature in Y only). Other surfaces infer their type from `radius` (0 = flat, nonzero = spherical)
 - `blender_manifest.toml` — Blender extension manifest
@@ -115,11 +116,14 @@ abbe_v = 26.5
 ## Shader Function Pipeline
 
 1. `load_lens_data()` — generated at registration; selects lens prescription by index. Outputs `surface_types[]` (int per surface: `SURFACE_SPHERICAL=0`, `SURFACE_FLAT=1`, `SURFACE_STOP=2`, `SURFACE_ASPHERIC=3`, `SURFACE_CYLINDRICAL_X=4`, `SURFACE_CYLINDRICAL_Y=5`), `extra[]` (8 floats per surface: k, A4, A6, A8, A10, reserved×3), `thicknesses_close[]`, `focus_close_distance` for variable element spacing, and `squeeze` for anamorphic desqueeze
+1b. `load_scene_lights()` — generated on depsgraph updates; provides scene light positions/directions/intensities in lens space for ghost light-aiming
+1c. `rng()` — integer hash (Jenkins one-at-a-time) that derives decorrelated random values from the two camera random samples. Each salt value yields an independent uniform [0,1] variate, replacing the earlier sin()-based hashes
 2. Thickness interpolation — when `focus_close_distance > 0`, interpolates `thicknesses[]` between infinity and close-focus values using `alpha = clamp(close_distance / d_obj, 0, 1)` in reciprocal object-distance space. All downstream functions receive the adjusted thicknesses
 3. `compute_sensor_distance()` — Y-axis ABCD matrix paraxial trace (front-to-back) to find sensor plane position from focus distance. Cylindrical_x surfaces are skipped (no Y power); cylindrical_y surfaces contribute
 4. `compute_exit_pupil()` — Dual X/Y ABCD matrices for rear subsystem to find exit pupil position/magnification per axis. Derives stop index from `surface_types[]`
 5. `compute_field_exit_pupil()` — tightens the exit pupil disk for off-axis sensor points by projecting rear element apertures. Derives stop index from `surface_types[]`
-6. `compute_ghost_aim_radius()` — Per-pair ABCD trace through the full ghost path (all three phases including reflections) to find the tightest aperture constraint projected back to the aim plane. Returns a ghost-specific aim radius that replaces the main exit pupil radius for ghost ray sampling
+6. `compute_ghost_aim_radius()` — Per-pair ABCD trace through the full ghost path (all three phases including reflections) to find the tightest aperture constraint projected back to the aim plane. Returns a ghost-specific aim radius and the ABCD C,D matrix elements used for light-aiming inversion
+6b. `compute_light_aim_points()` — ABCD-inverts each scene light to find its aim-plane position for a given ghost pair. Used by both the main ghost path and debug mode 5
 7. `trace_lens_system()` — sequential ray trace (rear-to-front) calling `refract_at_surface()` per element. Uses `surface_types[]` for all type dispatch. Includes sphere-overlap retry logic for thin flat surfaces adjacent to curved ones
 8. `find_surface_intersection()` — geometry-only helper: finds intersection point and surface normal for any surface type (flat, stop, spherical, aspheric, cylindrical). Returns 1=hit, 0=miss, -1=clipped
 9. `refract_at_surface()` — calls `find_surface_intersection()`, then applies Snell's law + Fresnel transmittance. Stops pass through without refraction
@@ -135,9 +139,11 @@ Throughput weighting applies cos^4 radiometric falloff and normalizes Fresnel lo
 
 When `lens_ghosts` is enabled, a fraction of samples trace ghost paths instead of direct paths. This fraction is adaptive: `adaptive_frac = clamp(sqrt(ghost_total_weight) * ghost_intensity * 2.0, 0.02, 0.5)`, where `ghost_total_weight` is the sum of `R_a * R_b` across all valid pairs. Ghost pairs are enumerated from all surfaces with a Fresnel interface (non-stop, IOR-changing), and selected with probability proportional to `R_a * R_b`.
 
-- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * (ghost_total_weight / ghost_pair_weight) / adaptive_frac * ghost_intensity`, where `ghost_total_weight / ghost_pair_weight` is the inverse pdf (1/pdf) for the selected pair
+- Ghost throughput: `cos^4 * (ghost_T / onaxis_T) * (ghost_total_weight / ghost_pair_weight) / adaptive_frac * ghost_intensity * pdf_factor * area_ratio`, where `ghost_total_weight / ghost_pair_weight` is the inverse pdf (1/pdf) for the selected pair, `area_ratio` scales by the ghost-to-direct sampling area ratio, and `pdf_factor` compensates for the 70/30 light-aiming split
 - Direct throughput (when ghosts active): `cos^4 * (T / onaxis_T) / (1 - adaptive_frac)`
+- Light-aimed ghost sampling: 70% of ghost samples are aimed at scene lights via ABCD matrix inversion (mapping desired exit angle to aim-plane position), 30% use uniform disk sampling as fallback. `compute_light_aim_points()` handles the inversion; lights are selected proportional to intensity with jitter for angular size
 - Debug mode 4 ("Ghosts Only"): all samples trace ghost paths, direct rays suppressed
+- Debug mode 5 ("Ghost Aim"): diagnostic showing light-aiming pipeline — R=light count, G=aiming valid, B=ghost pair selected
 
 ## Coordinate System
 

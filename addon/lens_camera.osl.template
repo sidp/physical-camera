@@ -2,6 +2,22 @@
 
 // {{SCENE_LIGHTS}}
 
+// Integer hash: decorrelated random values from the two camera random
+// samples. Each salt value yields an independent uniform [0,1] variate.
+float rng(float a, float b, int salt)
+{
+    int h = int(a * 16384.0) + salt;
+    h = h + (h << 10);
+    h = h ^ (h >> 6);
+    h = h + int(b * 16384.0);
+    h = h + (h << 10);
+    h = h ^ (h >> 6);
+    h = h + (h << 3);
+    h = h ^ (h >> 11);
+    h = h + (h << 15);
+    return float((h ^ (h >> 16)) & 32767) / 32767.0;
+}
+
 // Cauchy dispersion: n(λ) = A + B/λ², coefficients derived from n_d and Abbe number.
 float cauchy_ior(float n_d, float v_d, float lambda_nm)
 {
@@ -537,6 +553,66 @@ float compute_ghost_aim_radius(
     out_Cx = Cx;  out_Dx = Dx;
     out_Cy = Cy;  out_Dy = Dy;
     return max(result, 0.0);
+}
+
+// ABCD-invert each scene light to find its aim-plane position for a given
+// ghost pair. Returns 1 if any valid aim point was found, 0 otherwise.
+// out_denom_x/y are the ABCD inversion denominators (needed for jitter).
+int compute_light_aim_points(
+    int num_lights,
+    int light_types[MAX_LIGHTS],
+    float light_pos[MAX_LIGHTS_3],
+    float light_dir[MAX_LIGHTS_3],
+    float light_intensity[MAX_LIGHTS],
+    float g_Cx, float g_Dx, float g_Cy, float g_Dy,
+    float sensor_x, float sensor_y, float sensor_z,
+    float aim_z, float ghost_semi_ap, float front_z,
+    output float aim_hx[MAX_LIGHTS],
+    output float aim_hy[MAX_LIGHTS],
+    output float aim_weights[MAX_LIGHTS],
+    output float aim_total,
+    output float out_denom_x, output float out_denom_y)
+{
+    aim_total = 0.0;
+    float inv_sa = 1.0 / (sensor_z - aim_z);
+    out_denom_x = g_Cx - g_Dx * inv_sa;
+    out_denom_y = g_Cy - g_Dy * inv_sa;
+    int valid_x = abs(out_denom_x) > 1e-12;
+    int valid_y = abs(out_denom_y) > 1e-12;
+
+    if (!valid_x && !valid_y)
+        return 0;
+
+    for (int li = 0; li < num_lights; li++) {
+        aim_weights[li] = 0.0;
+        float theta_x = 0.0, theta_y = 0.0;
+
+        if (light_types[li] == 1) {
+            float ldz = light_dir[li * 3 + 2];
+            if (ldz >= 0.0) continue;
+            theta_x = -light_dir[li * 3 + 0] / ldz;
+            theta_y = -light_dir[li * 3 + 1] / ldz;
+        } else {
+            float lpz = light_pos[li * 3 + 2];
+            if (lpz >= front_z) continue;
+            float dz_inv = 1.0 / (front_z - lpz);
+            theta_x = light_pos[li * 3 + 0] * dz_inv;
+            theta_y = light_pos[li * 3 + 1] * dz_inv;
+        }
+
+        float hx = valid_x ? (-theta_x - g_Dx * sensor_x * inv_sa) / out_denom_x : 0.0;
+        float hy = valid_y ? (-theta_y - g_Dy * sensor_y * inv_sa) / out_denom_y : 0.0;
+
+        if (sqrt(hx * hx + hy * hy) > ghost_semi_ap * 1.5)
+            continue;
+
+        aim_hx[li] = hx;
+        aim_hy[li] = hy;
+        aim_weights[li] = light_intensity[li];
+        aim_total += light_intensity[li];
+    }
+
+    return aim_total > 0.0 ? 1 : 0;
 }
 
 int intersect_sphere(
@@ -1420,8 +1496,7 @@ shader lens_camera(
     float lambda = 587.6;
     float r_param = rnd[1];
     if (chromatic_aberration) {
-        float h = sin(rnd[0] * 12.9898 + rnd[1] * 78.233) * 43758.5453;
-        lambda = 400.0 + (h - floor(h)) * 300.0;
+        lambda = 400.0 + rng(rnd[0], rnd[1], 0) * 300.0;
     }
 
     // Compute wavelength-adjusted IOR for exit pupil aiming and Fresnel
@@ -1568,16 +1643,14 @@ shader lens_camera(
                 sqrt(ghost_total_weight) * ghost_intensity * 2.0,
                 0.02, 0.5);
 
-            float ghost_hash = sin(rnd[0] * 45.233 + rnd[1] * 97.113) * 21453.1211;
-            ghost_hash = ghost_hash - floor(ghost_hash);
+            float ghost_hash = rng(rnd[0], rnd[1], 1);
             int ghosts_only = (debug_mode >= 3.5 && debug_mode < 4.5) ? 1 : 0;
 
             if (ghosts_only || ghost_hash < adaptive_frac) {
                 trace_ghost = 1;
 
                 // Select pair with probability proportional to R_a * R_b
-                float pair_hash = sin(rnd[0] * 31.7 + rnd[1] * 53.9) * 17431.7;
-                pair_hash = pair_hash - floor(pair_hash);
+                float pair_hash = rng(rnd[0], rnd[1], 2);
                 float target_w = pair_hash * ghost_total_weight;
                 float cumulative = 0.0;
 
@@ -1607,11 +1680,7 @@ shader lens_camera(
     }
 
     // Debug mode 5: ghost aim diagnostic
-    // Flat image showing light-aiming pipeline stages.
-    // R = num_lights / MAX_LIGHTS (brightness = lights found)
-    // G = light aiming succeeded for this sample
-    // B = ghost pair was selected (trace_ghost)
-    // Black pixel = no ghost pair selected
+    // R = num_lights / MAX_LIGHTS, G = light aiming valid, B = trace_ghost
     if (debug_mode >= 4.5 && debug_mode < 5.5) {
         position = point(0, 0, 0);
         direction = normalize(vector(-sensor_x, -sensor_y, 50.0));
@@ -1621,16 +1690,13 @@ shader lens_camera(
             return;
         }
 
-        // Run the same light-loading and aiming logic to see what happens
-        float dbg_g_Cx = 0.0, dbg_g_Dx = 0.0, dbg_g_Cy = 0.0, dbg_g_Dy = 0.0;
-        float dbg_ghost_semi_ap = compute_ghost_aim_radius(
+        float dbg_Cx = 0.0, dbg_Dx = 0.0, dbg_Cy = 0.0, dbg_Dy = 0.0;
+        float dbg_semi_ap = compute_ghost_aim_radius(
             ghost_a, ghost_b, num_surfaces,
             radii, dispersed_iors, apertures, surface_types, vertex_z,
             aperture_scale, sensor_z, aim_z, aim_semi_ap,
-            dbg_g_Cx, dbg_g_Dx, dbg_g_Cy, dbg_g_Dy);
-        dbg_ghost_semi_ap *= 1.1;
-        if (dbg_ghost_semi_ap > aim_semi_ap)
-            dbg_ghost_semi_ap = aim_semi_ap;
+            dbg_Cx, dbg_Dx, dbg_Cy, dbg_Dy);
+        dbg_semi_ap = min(dbg_semi_ap * 1.1, aim_semi_ap);
 
         int dbg_num_lights = 0;
         int dbg_light_types[MAX_LIGHTS];
@@ -1641,44 +1707,24 @@ shader lens_camera(
         load_scene_lights(dbg_num_lights, dbg_light_types, dbg_light_pos,
                           dbg_light_dir, dbg_light_intensity, dbg_light_radius);
 
-        float dbg_r = float(dbg_num_lights) / float(MAX_LIGHTS);
-
-        // Try ABCD inversion for each light to count valid ones
         float dbg_g = 0.0;
-        if (dbg_num_lights > 0 && dbg_ghost_semi_ap > 0.0) {
-            float dbg_inv_sa = 1.0 / (sensor_z - aim_z);
-            float dbg_denom_x = dbg_g_Cx - dbg_g_Dx * dbg_inv_sa;
-            float dbg_denom_y = dbg_g_Cy - dbg_g_Dy * dbg_inv_sa;
-
-            int dbg_valid_x = abs(dbg_denom_x) > 1e-12;
-            int dbg_valid_y = abs(dbg_denom_y) > 1e-12;
-            if (dbg_valid_x || dbg_valid_y) {
-                for (int li = 0; li < dbg_num_lights; li++) {
-                    float theta_x = 0.0, theta_y = 0.0;
-                    if (dbg_light_types[li] == 1) {
-                        float ldz = dbg_light_dir[li * 3 + 2];
-                        if (ldz >= 0.0) continue;
-                        theta_x = -dbg_light_dir[li * 3 + 0] / ldz;
-                        theta_y = -dbg_light_dir[li * 3 + 1] / ldz;
-                    } else {
-                        float lpz = dbg_light_pos[li * 3 + 2];
-                        if (lpz >= vertex_z[0]) continue;
-                        float dz_inv = 1.0 / (vertex_z[0] - lpz);
-                        theta_x = dbg_light_pos[li * 3 + 0] * dz_inv;
-                        theta_y = dbg_light_pos[li * 3 + 1] * dz_inv;
-                    }
-                    float hx = dbg_valid_x ? (-theta_x - dbg_g_Dx * sensor_x * dbg_inv_sa) / dbg_denom_x : 0.0;
-                    float hy = dbg_valid_y ? (-theta_y - dbg_g_Dy * sensor_y * dbg_inv_sa) / dbg_denom_y : 0.0;
-                    if (sqrt(hx * hx + hy * hy) <= dbg_ghost_semi_ap * 1.5) {
-                        dbg_g = 1.0;
-                        break;
-                    }
-                }
-            }
+        if (dbg_num_lights > 0 && dbg_semi_ap > 0.0) {
+            float dbg_hx[MAX_LIGHTS], dbg_hy[MAX_LIGHTS];
+            float dbg_w[MAX_LIGHTS], dbg_total = 0.0;
+            float dbg_dx = 0.0, dbg_dy = 0.0;
+            if (compute_light_aim_points(
+                    dbg_num_lights, dbg_light_types, dbg_light_pos,
+                    dbg_light_dir, dbg_light_intensity,
+                    dbg_Cx, dbg_Dx, dbg_Cy, dbg_Dy,
+                    sensor_x, sensor_y, sensor_z,
+                    aim_z, dbg_semi_ap, vertex_z[0],
+                    dbg_hx, dbg_hy, dbg_w, dbg_total,
+                    dbg_dx, dbg_dy))
+                dbg_g = 1.0;
         }
 
-        float dbg_b = 1.0;
-        throughput = color(dbg_r, dbg_g, dbg_b);
+        float dbg_r = float(dbg_num_lights) / float(MAX_LIGHTS);
+        throughput = color(dbg_r, dbg_g, 1.0);
         return;
     }
 
@@ -1694,9 +1740,7 @@ shader lens_camera(
             radii, dispersed_iors, apertures, surface_types, vertex_z,
             aperture_scale, sensor_z, aim_z, aim_semi_ap,
             g_Cx, g_Dx, g_Cy, g_Dy);
-        ghost_semi_ap *= 1.1;
-        if (ghost_semi_ap > aim_semi_ap)
-            ghost_semi_ap = aim_semi_ap;
+        ghost_semi_ap = min(ghost_semi_ap * 1.1, aim_semi_ap);
 
         // Load scene lights for light-aimed ghost sampling
         int num_lights = 0;
@@ -1709,13 +1753,11 @@ shader lens_camera(
                           light_intensity, light_radius);
 
         // 70/30 split: aim at lights vs uniform fallback
-        float light_hash = sin(rnd[0] * 73.517 + rnd[1] * 119.203) * 31247.7;
-        light_hash = light_hash - floor(light_hash);
+        float light_hash = rng(rnd[0], rnd[1], 3);
         int use_light_aim = 0;
         float pdf_factor = 1.0;
         float aim_x = 0.0, aim_y = 0.0;
 
-        float inv_sa = 1.0 / (sensor_z - aim_z);
         float front_z = vertex_z[0];
 
         // Pre-compute uniform aim point for degenerate-axis fallback
@@ -1725,118 +1767,79 @@ shader lens_camera(
         float uniform_aim_y = ghost_r_u * sin(ghost_angle_u);
 
         if (num_lights > 0 && ghost_semi_ap > 0.0 && light_hash < 0.7) {
-            // ABCD inversion: map desired exit angle to aim-plane position
-            float denom_x = g_Cx - g_Dx * inv_sa;
-            float denom_y = g_Cy - g_Dy * inv_sa;
+            float aim_hx[MAX_LIGHTS], aim_hy[MAX_LIGHTS];
+            float aim_weights[MAX_LIGHTS], aim_total = 0.0;
+            float denom_x = 0.0, denom_y = 0.0;
 
-            int valid_x = abs(denom_x) > 1e-12;
-            int valid_y = abs(denom_y) > 1e-12;
-            if (valid_x || valid_y) {
-                // Compute per-light aim points and weights
-                float aim_weights[MAX_LIGHTS];
-                float aim_hx[MAX_LIGHTS];
-                float aim_hy[MAX_LIGHTS];
-                float aim_total = 0.0;
+            if (compute_light_aim_points(
+                    num_lights, light_types, light_pos,
+                    light_dir, light_intensity,
+                    g_Cx, g_Dx, g_Cy, g_Dy,
+                    sensor_x, sensor_y, sensor_z,
+                    aim_z, ghost_semi_ap, front_z,
+                    aim_hx, aim_hy, aim_weights, aim_total,
+                    denom_x, denom_y)) {
 
-                for (int li = 0; li < num_lights; li++) {
-                    aim_weights[li] = 0.0;
-                    float theta_x = 0.0, theta_y = 0.0;
+                int valid_x = abs(denom_x) > 1e-12;
+                int valid_y = abs(denom_y) > 1e-12;
 
-                    if (light_types[li] == 1) {
-                        // Sun: direction-based
-                        float ldz = light_dir[li * 3 + 2];
-                        if (ldz >= 0.0) continue;
-                        theta_x = -light_dir[li * 3 + 0] / ldz;
-                        theta_y = -light_dir[li * 3 + 1] / ldz;
-                    } else {
-                        // Positional light
-                        float lpz = light_pos[li * 3 + 2];
-                        if (lpz >= front_z) continue;
-                        float dz_inv = 1.0 / (front_z - lpz);
-                        theta_x = light_pos[li * 3 + 0] * dz_inv;
-                        theta_y = light_pos[li * 3 + 1] * dz_inv;
-                    }
+                // CDF scan to select light proportional to intensity
+                float sel_hash = rng(rnd[0], rnd[1], 4);
+                float target = sel_hash * aim_total;
+                float cumul = 0.0;
+                int sel = -1;
 
-                    // Ghost rays exit toward -z, so u_exit = -theta
-                    // For degenerate axes (cylindrical ghost reflections),
-                    // check with 0 and store uniform fallback
-                    float hx = valid_x ? (-theta_x - g_Dx * sensor_x * inv_sa) / denom_x : 0.0;
-                    float hy = valid_y ? (-theta_y - g_Dy * sensor_y * inv_sa) / denom_y : 0.0;
-
-                    // Reject if aim point falls outside ghost aperture (1.5x margin
-                    // for paraxial approximation error)
-                    if (sqrt(hx * hx + hy * hy) > ghost_semi_ap * 1.5)
-                        continue;
-
-                    aim_hx[li] = valid_x ? hx : uniform_aim_x;
-                    aim_hy[li] = valid_y ? hy : uniform_aim_y;
-                    aim_weights[li] = light_intensity[li];
-                    aim_total += light_intensity[li];
+                for (int li = 0; li < num_lights && sel < 0; li++) {
+                    if (aim_weights[li] <= 0.0) continue;
+                    cumul += aim_weights[li];
+                    if (cumul >= target)
+                        sel = li;
                 }
 
-                if (aim_total > 0.0) {
-                    // CDF scan to select light proportional to intensity
-                    float sel_hash = sin(rnd[0] * 89.311 + rnd[1] * 47.629) * 42197.3;
-                    sel_hash = sel_hash - floor(sel_hash);
-                    float target = sel_hash * aim_total;
-                    float cumul = 0.0;
-                    int sel = -1;
+                if (sel >= 0) {
+                    aim_x = valid_x ? aim_hx[sel] : uniform_aim_x;
+                    aim_y = valid_y ? aim_hy[sel] : uniform_aim_y;
 
-                    for (int li = 0; li < num_lights && sel < 0; li++) {
-                        if (aim_weights[li] <= 0.0) continue;
-                        cumul += aim_weights[li];
-                        if (cumul >= target)
-                            sel = li;
+                    // Jitter for light angular size
+                    if (light_radius[sel] > 0.0) {
+                        float radius_angle = 0.0;
+                        if (light_types[sel] == 1) {
+                            radius_angle = light_radius[sel];
+                        } else {
+                            float lpz = light_pos[sel * 3 + 2];
+                            float d = front_z - lpz;
+                            if (d > 1.0)
+                                radius_angle = light_radius[sel] / d;
+                        }
+                        float jitter_r_x = valid_x ? radius_angle / abs(denom_x) : 0.0;
+                        float jitter_r_y = valid_y ? radius_angle / abs(denom_y) : 0.0;
+                        float jh = rng(rnd[0], rnd[1], 5);
+                        float ja = rnd[1] * 2.0 * M_PI;
+                        float jr = sqrt(jh);
+                        aim_x += jr * cos(ja) * jitter_r_x;
+                        aim_y += jr * sin(ja) * jitter_r_y;
                     }
 
-                    if (sel >= 0) {
-                        aim_x = aim_hx[sel];
-                        aim_y = aim_hy[sel];
-
-                        // Jitter for light angular size
-                        if (light_radius[sel] > 0.0) {
-                            float radius_angle = 0.0;
-                            if (light_types[sel] == 1) {
-                                radius_angle = light_radius[sel];
-                            } else {
-                                float lpz = light_pos[sel * 3 + 2];
-                                float d = front_z - lpz;
-                                if (d > 1.0)
-                                    radius_angle = light_radius[sel] / d;
-                            }
-                            float jitter_r_x = valid_x ? radius_angle / abs(denom_x) : 0.0;
-                            float jitter_r_y = valid_y ? radius_angle / abs(denom_y) : 0.0;
-                            float jh = sin(rnd[0] * 53.811 + rnd[1] * 71.439) * 27613.9;
-                            jh = jh - floor(jh);
-                            float ja = rnd[1] * 2.0 * M_PI;
-                            float jr = sqrt(jh);
-                            aim_x += jr * cos(ja) * jitter_r_x;
-                            aim_y += jr * sin(ja) * jitter_r_y;
-                        }
-
-                        // Clamp to ghost aperture
-                        float aim_r = sqrt(aim_x * aim_x + aim_y * aim_y);
-                        if (aim_r > ghost_semi_ap) {
-                            float scale = ghost_semi_ap / aim_r;
-                            aim_x *= scale;
-                            aim_y *= scale;
-                        }
-
-                        use_light_aim = 1;
-                        pdf_factor = 1.0 / 0.7;
+                    // Clamp to ghost aperture
+                    float aim_r = sqrt(aim_x * aim_x + aim_y * aim_y);
+                    if (aim_r > ghost_semi_ap) {
+                        float scale = ghost_semi_ap / aim_r;
+                        aim_x *= scale;
+                        aim_y *= scale;
                     }
+
+                    use_light_aim = 1;
+                    pdf_factor = 1.0 / 0.7;
                 }
             }
         }
 
         if (!use_light_aim) {
-            // Uniform fallback
             aim_x = uniform_aim_x;
             aim_y = uniform_aim_y;
-            // Only compensate for the 30% allocation when this sample was
-            // actually drawn from the uniform pool (light_hash >= 0.7).
-            // Failed light-aiming attempts that fall back here use pdf_factor=1.
-            if (num_lights > 0 && light_hash >= 0.7)
+            // All uniform samples get the same weight regardless of whether
+            // they came from the 30% pool or a failed light-aim attempt.
+            if (num_lights > 0)
                 pdf_factor = 1.0 / 0.3;
         }
 
@@ -1949,12 +1952,9 @@ shader lens_camera(
 
         // Aperture diffraction: perturb exit direction to produce starbursts
         if (diffraction) {
-            float diff_h1 = sin(rnd[0] * 67.301 + rnd[1] * 131.729) * 39571.7;
-            diff_h1 = diff_h1 - floor(diff_h1);
-            float diff_h2 = sin(rnd[0] * 113.519 + rnd[1] * 29.853) * 51439.3;
-            diff_h2 = diff_h2 - floor(diff_h2);
-            float diff_h3 = sin(rnd[0] * 37.719 + rnd[1] * 83.461) * 63197.9;
-            diff_h3 = diff_h3 - floor(diff_h3);
+            float diff_h1 = rng(rnd[0], rnd[1], 6);
+            float diff_h2 = rng(rnd[0], rnd[1], 7);
+            float diff_h3 = rng(rnd[0], rnd[1], 8);
 
             vector diff_perturb = vector(0, 0, 0);
             float diff_w = apply_diffraction(
