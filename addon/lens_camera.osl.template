@@ -1974,6 +1974,7 @@ shader lens_camera(
         if (diffraction && aperture_blades >= 3) {
             int n = aperture_blades;
             float stop_d = stop_semi_ap * 2.0;
+            if (stop_d < 1e-6) stop_d = 1e-6;
             float theta0 = (lambda * 1e-6) / (stop_d * cos(M_PI / float(n)));
             float theta0_perp = (lambda * 1e-6) / (stop_d * sin(M_PI / float(n)));
 
@@ -2026,11 +2027,18 @@ shader lens_camera(
                         float sel_hash = rng(rnd[0], rnd[1], 10);
                         float target = sel_hash * diff_aim_total;
                         float cumul = 0.0;
-                        int sel = 0;
+                        int sel = -1;
                         for (int li = 0; li < num_lights; li++) {
                             if (diff_aim_weights[li] <= 0.0) continue;
                             cumul += diff_aim_weights[li];
                             if (cumul >= target) { sel = li; break; }
+                        }
+                        // Guard against floating-point edge case where CDF
+                        // scan doesn't match — fall back to first valid light
+                        if (sel < 0) {
+                            for (int li = 0; li < num_lights; li++) {
+                                if (diff_aim_weights[li] > 0.0) { sel = li; break; }
+                            }
                         }
 
                         float lx = theta_lx[sel];
