@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .lenses import MAX_SURFACES, load_lenses
+from .lenses import load_lenses
 from .scene_lights import generate_load_scene_lights
 
 N_EXTRA = 8

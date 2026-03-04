@@ -379,12 +379,25 @@ def _update_scene_lights(scene):
         _updating_lights = False
 
 
+def _migrate_legacy_text_block(cam):
+    """Migrate cameras using the old shared text datablock name."""
+    if (cam.type == 'CUSTOM'
+            and cam.custom_mode == 'INTERNAL'
+            and cam.custom_shader is not None
+            and cam.custom_shader.name == "Physical Lens OSL"):
+        _build_camera_shader(cam)
+
+
 @persistent
 def _on_load_post(_):
     """Rebuild shaders for all physical lens cameras after file load."""
     global _cached_light_key, _lights
     _cached_light_key = None
     _lights = []
+
+    # Migrate cameras from the old shared text datablock
+    for cam in bpy.data.cameras:
+        _migrate_legacy_text_block(cam)
 
     has_any = False
     for cam in bpy.data.cameras:
